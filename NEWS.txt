@@ -22,6 +22,7 @@ Version 7.0 - not yet released
   - GliderLink: new driver
   - AirControlDisplay: read radio frequencies from PAAVS,COM sentence
   - driver for LXNano modified, so declaration contains copilot
+  - added ports 8880, 8881, 8882 to tcp-client
 * weather
   - merge all weather data in one dialog
   - allow showing both terrain and RASP
