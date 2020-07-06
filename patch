@@ -1,0 +1,14 @@
+diff --git a/src/Dialogs/Device/DeviceEditWidget.cpp b/src/Dialogs/Device/DeviceEditWidget.cpp
+index 6c87ab5761..771cb29f42 100644
+--- a/src/Dialogs/Device/DeviceEditWidget.cpp
++++ b/src/Dialogs/Device/DeviceEditWidget.cpp
+@@ -270,6 +270,9 @@ FillTCPPorts(DataFieldEnum &dfe)
+   dfe.addEnumText(_T("4352"), 4352);
+   dfe.addEnumText(_T("2000"), 2000);
+   dfe.addEnumText(_T("23"), 23);
++  dfe.addEnumText(_T("8880"), 8880);
++  dfe.addEnumText(_T("8881"), 8881);
++  dfe.addEnumText(_T("8882"), 8882);
+ }
+ 
+ static void
