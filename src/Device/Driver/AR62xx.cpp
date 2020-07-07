@@ -32,6 +32,8 @@ Copyright_License {
  *
  */
 
+#include "LogFile.hpp"
+
 #include "Device/Driver/AR62xx.hpp"
 #include "Device/Driver.hpp"
 #include "Device/Port/Port.hpp"
@@ -41,14 +43,14 @@ Copyright_License {
 #include "Thread/Mutex.hxx"
 #include "Util/CharUtil.hxx"
 #include "Util/StaticFifoBuffer.hxx"
-#include "LogFile.hpp"
+
 
 #include <stdint.h>
 #include <stdio.h>
 #include <chrono>
 #include <cstdlib>
 
-//Einige Konstanten und Ausdruecke, das AR62xx hat ein Binaerprotokoll
+//Constants for AR62xx binary protocol
 constexpr uint8_t HEADER_ID = 0xA5;
 #define PROTID  0x14;
 #define QUERY   BIT(7)
@@ -62,19 +64,19 @@ constexpr uint8_t HEADER_ID = 0xA5;
 #define BIT(n) (1 << (n))
 #define NAME_SIZE 30
 
-typedef union {
+union IntConvertStruct {
   uint16_t intVal16;
   uint8_t  intVal8[2];
-} IntConvertStruct;
+};
 
 typedef struct {
   double ActiveFrequency;    //active station frequency
   double PassiveFrequency;   // passive (or standby) station frequency
   TCHAR PassiveName[NAME_SIZE] ; // passive (or standby) station name
   TCHAR ActiveName[NAME_SIZE] ;  //active station name
-  int Volume ;               // Radio Volume
-  int Squelch ;              // Radio Squelch
-  int Vox ;                  // Radio Intercom Volume
+  int Volume;               // Radio Volume
+  int Squelch;               // Radio Squelch
+  int Vox;                  // Radio Intercom Volume
   bool Changed;              // Parameter Changed Flag            (TRUE = parameter changed)
   bool Enabled;              // Radio Installed d Flag            (TRUE = Radio found)
   bool Dual;                 // Dual Channel mode active flag     (TRUE = on)
@@ -92,7 +94,7 @@ IntConvertStruct sFrequency;
 IntConvertStruct sStatus;
 
 volatile bool bSending = false;
-//End Einige Konstanten und Ausdruecke, das AR62xx hat ein Binaerprotokoll
+//End Constants for AR62xx binary protocol
 
 
 /**
@@ -214,7 +216,7 @@ public:
 //TCHAR = char
 
 /*
- * Converting to a hex string for a useful output via LogFormat
+ * Converting to a hex string for a useful output
  */
 uint8_t AR62xxDevice::toHexString(const void* data, size_t size) {
   uint8_t szHex = 0;
@@ -292,13 +294,11 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
     auto _response = response;
     response_mutex.unlock();
     bSending = false;
-    //LogFormat(_T("AR620x AR62xxDevice::Send: gesendet = %d Zeichen= 0x%04X response= 0x%04X"), msg_size, toHexString(msg, msg_size), _response);
     if (_response == ACK)
       // ACK received, finish, all went well
       return true;
 
     // No ACK received, retry, possibly an error occurred
-    LogFormat(_T("AR620x AR62xxDevice::Send: answer = 0x%04X"), _response);
     retries--;
   } while (retries);
   return false;
@@ -355,7 +355,7 @@ uint16_t AR62xxDevice::Frq2Idx(double fFreq) {
     case 85:  uFreIdx += 14; break;
     case 90:  uFreIdx += 15; break;
     case 100: uFreIdx += 0;  break;
-    default:   LogFormat(_T("undefined Frequency!  %u -> %u"),uiFrac, uFreIdx); break;
+    default:   break;
   }
   return (uFreIdx);
 }
@@ -391,7 +391,6 @@ static uint16_t CRCBitwise(uint8_t *data, size_t len) {
  *
  *****************************************************************************/
 int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double fFrequency, const TCHAR* Station) {
-  //LogFormat(_T("In SetAR620xStation: %s, %i, %6.3f, %s"), Command, Active_Passive, fFrequency, Station);
   unsigned int len = 0;
   assert(Station !=NULL);
   assert(Command !=NULL);
@@ -404,16 +403,13 @@ int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double 
   Command [len++] = HEADER_ID ;
   Command [len++] = PROTID ;
   Command [len++] = 5;
-  //LogFormat(_T("In SetAR620xStation: len = %d, Command(Header_ID, 0x14, 5) = %s"), len, Command);
   switch (Active_Passive) { //converting the frequency which is to be changed
     case ACTIVE_STATION:
       ActiveFreqIdx.intVal16 = Frq2Idx(fFrequency);
-      //LogFormat(_T("In SetAR620xStation: >AF:0x%04X  %7.3f"), ActiveFreqIdx.intVal16, fFrequency);
     break;
     default:
     case PASSIVE_STATION:
       PassiveFreqIdx.intVal16 =  Frq2Idx(fFrequency);
-      //LogFormat(_T("In SetAR620xStation: >PF:0x%04X  %7.3f"), PassiveFreqIdx.intVal16, fFrequency);
     break;
   }
   Command [len++] = 22; //setting frequencies -command byte in the protocol of the radio
@@ -424,7 +420,6 @@ int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double 
   CRC.intVal16 =  CRCBitwise(Command, len); //Creating the binary value
   Command [len++] = CRC.intVal8[1];
   Command [len++] = CRC.intVal8[0];
-  //LogFormat(_T("In SetAR620xStation: len = %d, Command = 0x%04X"), len, toHexString(Command, len));
   return len;
 }
 
@@ -437,11 +432,6 @@ bool AR62xxDevice::AR620xPutFreqActive(double Freq, const TCHAR* StationName, Op
   uint8_t  szTmp[MAX_CMD_LEN];
   len = SetAR620xStation(szTmp ,ACTIVE_STATION, Freq, StationName);
   bool isSend = Send((uint8_t *) &szTmp, len /*sizeof(szTmp)*/, env);  //len seems to be ok!
-  if (isSend){
-    LogFormat(_T("AR62xxDevice::AR620xPutFreqActive => send: 0x%04X, len: %d, frequency: %6.3f, station: %s"), toHexString(szTmp, len), len, Freq, StationName);
-  } else {
-    LogFormat(_T("%s"),"Error while AR62xxDevice::AR620xPutFreqActive ...");
-  }
   return isSend;
 }
 
@@ -453,13 +443,7 @@ bool AR62xxDevice::AR620xPutFreqStandby(double Freq, const TCHAR* StationName, O
   int len;
   uint8_t  szTmp[MAX_CMD_LEN] = {};
   len = SetAR620xStation(szTmp ,PASSIVE_STATION, Freq, StationName);
-  bool isSend = Send((uint8_t *) &szTmp, len, env);
-  if (isSend){
-    LogFormat(_T("AR62xxDevice::AR620xPutFreqStandby => send: 0x%04X, len: %d, frequency: %6.3f, station: %s"), toHexString(szTmp, len), len, Freq, StationName);
-  } else {
-    LogFormat(_T("%s"),"Error while AR62xxDevice::AR620xPutFreqStandby ...");
-  }
-  return isSend;
+  return Send((uint8_t *) &szTmp, len, env);
 }
 
 /*
@@ -491,21 +475,13 @@ bool AR62xxDevice::AR620xParseString(const char *String, size_t len) {
     if(Recbuflen >= 3){
       CommandLength = Command[2];
       if(Recbuflen >= (CommandLength+5) ) {// all received
-        //for(int i=0; i < (CommandLength+4);i++) {
-        //  LogFormat(_T("AR620x->ParseString %d Cmd: 0x%04X"), i, Command[i]);
-        //}
         CRC.intVal8[1] =  Command[CommandLength+3];
         CRC.intVal8[0] =  Command[CommandLength+4];
         CalCRC =CRCBitwise(Command, CommandLength+3);
         if(CalCRC == CRC.intVal16 || CRC.intVal16 == 0) {
           if(!bSending) {
-            //LogFormat(_T("AR620x->ParseString  Process Command 0x%04X"), Command[3]);
             AR620x_Convert_Answer(Command, CommandLength+5, CalCRC);
-//          } else {
-//            LogFormat(_T("AR620x->ParseString  skip Command 0x%04X"), Command[3]);
           }
-        } else {
-          LogFormat(_T("AR620x->ParseString  CRC check fail! CRC.intVal16= 0x%04X  CalCRC= 0x%04X"), CRC.intVal16, CalCRC);
         }
         Recbuflen = 0;
       }
@@ -523,7 +499,6 @@ bool AR62xxDevice::AR620xParseString(const char *String, size_t len) {
  * len            length of the AR620x binary code to be converted
  ****************************************************************************/
 int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CRC){
-  //LogFormat(_T("AR620x In Convert_Answer 0x%04X %d 0x%04X switchwert %u"), toHexString(szCommand, len), len, CRC, szCommand[3]);
   if(szCommand == NULL) return 0;
   if(len == 0)          return 0;
 
@@ -553,7 +528,6 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
         uiVolumeCRC = CRC;
         RadioPara.Changed = true;
         RadioPara.Volume = (50-(int)szCommand[4])/5;
-        //LogFormat(_T("AR620x Volume %u"), RadioPara.Volume);
       }
     break;
     case 4: //Squelsh settings
@@ -561,7 +535,6 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
         uiSquelchCRC = CRC;
         RadioPara.Changed = true;
         RadioPara.Squelch = (int)(szCommand[4]-6)/2+1;  // 6 + (Squelch-1)*2
-        //LogFormat(_T("AR620x Squelch %u"), RadioPara.Squelch);
       }
     break;
     case 12: //Dual scan settings
@@ -574,7 +547,6 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
           RadioPara.Dual = true;
         else
           RadioPara.Dual = false;
-        //LogFormat(_T("AR620x Dual %u"), RadioPara.Dual);
       }
     break;
 #ifdef RADIO_VOLTAGE
@@ -583,7 +555,6 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
         uiVoltageCRC = CRC;
         GPS_INFO.ExtBatt2_Voltage =   8.5 + szCommand[4] *0.1;
         RadioPara.Changed = true;
-        //LogFormat(_T("AR620x Supply Voltage: %4.1fV"), GPS_INFO.ExtBatt2_Voltage);
       }
     break;
 #endif
@@ -594,12 +565,10 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
         sFrequency.intVal8[1] = szCommand[4] ;
         sFrequency.intVal8[0] = szCommand[5] ;
         RadioPara.ActiveFrequency =  Idx2Freq(sFrequency.intVal16);
-        //LogFormat(_T("AR620x <AF: %u %7.3f"), sFrequency.intVal16, RadioPara.ActiveFrequency);
 
         sFrequency.intVal8[1] = szCommand[6];
         sFrequency.intVal8[0] = szCommand[7] ;
         RadioPara.PassiveFrequency =  Idx2Freq(sFrequency.intVal16);
-        //LogFormat(_T("AR620x <PF: %u %7.3f"), sFrequency.intVal16, RadioPara.PassiveFrequency);
         RadioPara.Changed = true;
       }
     break;
@@ -612,11 +581,6 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
         RadioPara.RX_standy = ((ulState & BIT(8)) > 0)  ? true : false;
         RadioPara.RX        = (RadioPara.RX_active ||   RadioPara.RX_standy );
         RadioPara.Changed = true;
-        //LogFormat(_T("AR620x ulState = 0x%X"), ulState);
-        //if(RadioPara.RX) LogFormat(_T("AR620x Rx..."));
-        //if(RadioPara.RX_active) LogFormat(_T("AR620x Rx Active..."));
-        //if(RadioPara.RX_standy) LogFormat(_T("AR620x Rx Passive..."));
-        //if(RadioPara.TX) LogFormat(_T("AR620x Tx..."));
       }
     break;
     default:
@@ -645,9 +609,7 @@ bool AR62xxDevice::PutStandbyFrequency(RadioFrequency frequency,
                                 OperationEnvironment &env) {
   unsigned int ufreq = frequency.GetKiloHertz();
   double freq = ufreq / 1000.0;
-  //LogFormat(_T("In PutStandbyFrequency: %6.3f, %s"), freq, name);
   bool done = AR620xPutFreqStandby(freq, (const TCHAR *)name, env);
-  //LogFormat(_T("In PutStandbyFrequency: %6.3f, %i, done..."), freq, done);
   return done;
 }
 
@@ -668,3 +630,4 @@ const struct DeviceRegister ar62xx_driver = {
   DeviceRegister::NO_TIMEOUT | DeviceRegister::RAW_GPS_DATA,
   AR62xxCreateOnPort,
 };
+
