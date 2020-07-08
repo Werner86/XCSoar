@@ -25,10 +25,10 @@ Copyright_License {
  * The driver is derived from the KRT2-driver. This version has implemented two methods yet:
  * setting the active frequency
  * setting the passive frequency
- * It can be added:
- * setting/reading dual scan on/off
- * reading frequency change on the radio
- * setting/reading squelsh settings
+ * 
+ * TODO: setting/reading dual scan on/off
+ * TODO: reading frequency change on the radio
+ * TODO: setting/reading squelsh settings
  *
  */
 
@@ -44,58 +44,89 @@ Copyright_License {
 #include "Util/CharUtil.hxx"
 #include "Util/StaticFifoBuffer.hxx"
 
-
 #include <stdint.h>
 #include <stdio.h>
 #include <chrono>
 #include <cstdlib>
 
-//Constants for AR62xx binary protocol
+/*
+ * Constants for AR62xx binary protocol
+ */
 constexpr uint8_t HEADER_ID = 0xA5;
-#define PROTID  0x14;
-#define QUERY   BIT(7)
-#define DUAL    BIT(8)
+#define PROT_ID 0x14;
+#define QUERY BIT(7)
+#define DUAL BIT(8)
 #define SQUELCH BIT(7)
 #define MAX_CMD_LEN 128
-#define ACTIVE_STATION  1
+#define ACTIVE_STATION 1
 #define PASSIVE_STATION 0
-#define RoundFreq(a) ((int)((a)*1000.0+0.5)/1000.0)
-#define Freq2Idx(a) (int)(((a)-118.0) * 3040/(137.00-118.0)+0.5)
 #define BIT(n) (1 << (n))
 #define NAME_SIZE 30
 
 union IntConvertStruct {
-  uint16_t intVal16;
-  uint8_t  intVal8[2];
+  uint16_t int_val_16;
+  uint8_t int_val_8[2];
 };
 
-typedef struct {
-  double ActiveFrequency;    //active station frequency
-  double PassiveFrequency;   // passive (or standby) station frequency
-  TCHAR PassiveName[NAME_SIZE] ; // passive (or standby) station name
-  TCHAR ActiveName[NAME_SIZE] ;  //active station name
-  int Volume;               // Radio Volume
-  int Squelch;               // Radio Squelch
-  int Vox;                  // Radio Intercom Volume
-  bool Changed;              // Parameter Changed Flag            (TRUE = parameter changed)
-  bool Enabled;              // Radio Installed d Flag            (TRUE = Radio found)
-  bool Dual;                 // Dual Channel mode active flag     (TRUE = on)
-  bool Enabled8_33;          // 8,33kHz Radio enabled             (TRUE = 8,33kHz)
-  bool RX;                   // Radio reception active            (TRUE = reception)
-  bool TX;                   // Radio transmission active         (TRUE = transmission)
-  bool RX_active;            // Radio reception on active station (TRUE = reception)
-  bool RX_standy;            // Radio reception on passive        (standby) station
-  bool lowBAT;               // Battery low flag                  (TRUE = Batt low)
-  bool TXtimeout;            // Timeout while transmission (2Min)
-} Radio_t;
+struct Radio_t
+{
+  //frequency of the currently active station
+  double active_frequency;
 
-IntConvertStruct CRC;
-IntConvertStruct sFrequency;
-IntConvertStruct sStatus;
+  //passive (or standby) station frequency
+  double passive_frequency;
 
-volatile bool bSending = false;
-//End Constants for AR62xx binary protocol
+  //passive (or standby) station name
+  TCHAR passive_name[NAME_SIZE];
 
+  //active station name
+  TCHAR active_name[NAME_SIZE];
+
+  //radio volume (the loudness of the radio)
+  int radio_volume;
+
+  //the squelch-level of the radio
+  int squelch;
+
+  //the intercom volume (loudness) of the radio
+  int vox;
+
+  //parameter changed flag (TRUE = parameter changed)
+  bool changed;
+
+  //Radio Installed d Flag (TRUE = Radio found)
+  bool enabled;
+
+  //Dual Channel mode active flag(TRUE = on)
+  bool dual;
+
+  //8,33kHz Radio enabled (TRUE = 8,33kHz)
+  bool enabled_8_33;
+
+  //Radio reception active (TRUE = reception)
+  bool reception_active;
+
+  //Radio transmission active (TRUE = transmission)
+  bool transmission_active;
+
+  //Radio reception on active station (TRUE = reception)
+  bool reception_on_active_station;
+
+  //Radio reception on passive (standby) station
+  bool reception_standby;
+
+  //Battery low flag (TRUE = Batt low)
+  bool low_bat;
+
+  //Timeout while transmission (2Min)
+  bool transmission_timeout;
+};
+
+IntConvertStruct crc;
+IntConvertStruct frequency;
+IntConvertStruct status;
+
+volatile bool sending = false;
 
 /**
  * AR62xx device class.
@@ -103,28 +134,44 @@ volatile bool bSending = false;
  * This class provides the interface to communicate with the AR62xx radio.
  * The driver retransmits messages in case of a failure.
  */
-class AR62xxDevice final : public AbstractDevice {
-  static constexpr unsigned CMD_TIMEOUT = 250; //!< Command timeout in millis.
-  static constexpr unsigned NR_RETRIES = 3; //!< Number of tries to send a command.
+class AR62xxDevice final : public AbstractDevice
+{
+  //!< Command timeout in millis.
+  static constexpr unsigned CMD_TIMEOUT = 250;
 
-  static constexpr char STX = 0x02; //!< Command start character.
-  static constexpr char ACK = 0x06; //!< Command acknowledged character.
-  static constexpr char NAK = 0x15; //!< Command not acknowledged character.
-  static constexpr char NO_RSP = 0; //!< No response received yet.
+  //!< Number of tries to send a command.
+  static constexpr unsigned NR_RETRIES = 3;
 
-  static constexpr size_t MAX_NAME_LENGTH = 10; //!< Max. radio station name length.
+  //!< Command start character.
+  static constexpr char START_CHAR = 0x02;
+
+  //!< Command acknowledged character.
+  static constexpr char ACKNOWLEDGED = 0x06;
+
+  //!< Command not acknowledged character.
+  static constexpr char NOT_ACKNOWLEDGED = 0x15;
+
+  //!< No response received yet.
+  static constexpr char NO_RESPONSE_YET = 0;
+
+  //!< Max. radio station name length.
+  static constexpr size_t MAX_NAME_LENGTH = 10;
+
   //! Port the radio is connected to.
   Port &port;
-  //! Expected length of the message just receiving.
-  //size_t expected_msg_length{};
+
   //! Buffer which receives the messages send from the radio.
   StaticFifoBuffer<uint8_t, 256u> rx_buf;
+
   //! Last response received from the radio.
   uint8_t response;
+
   //! Condition to signal that a response was received from the radio.
   Cond rx_cond;
+
   //! Mutex to be locked to access response.
   std::unique_lock<Mutex> response_mutex;
+
   // RadioPara aus LK8000
   Radio_t RadioPara;
 
@@ -148,7 +195,7 @@ private:
    * Called by "PutActiveFrequency"
    * doing the real work
    */
-  bool AR620xPutFreqActive(double Freq, const TCHAR *StationName, OperationEnvironment &env);
+  bool AR620xPutFreqActive(double frequency, const TCHAR *stationName, OperationEnvironment &env);
 
   /*
    * Called by "PutStandbyFrequency"
@@ -159,26 +206,24 @@ private:
   /*
    * Creates the correct index for a given readable frequency
    */
-  uint16_t Frq2Idx(double fFreq);
+  uint16_t FrequencyToIdx(double frequency);
 
   /*
    * Creates a correct frequency-number given by the index
    */
-  double Idx2Freq(uint16_t uFreqIdx);
+  double IdxToFrequency(uint16_t frequency_Idx);
 
   /*
    * This function sets the station name and frequency on the AR62xx
    */
-  int SetAR620xStation(uint8_t *Command, int Active_Passive, double fFrequency, const TCHAR* Station);
+  int SetAR620xStation(uint8_t *Command, int active_passive, double frequency, const TCHAR *station);
 
   /*
    * Parses the messages which XCSoar receives from the radio.
    */
   bool AR620xParseString(const char *String, size_t len);
 
-  int AR620x_Convert_Answer(uint8_t  *szCommand, int len, uint16_t CRC);
-
-  uint8_t toHexString(const void* data, size_t size);
+  int AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CRC);
 
 public:
   /**
@@ -209,38 +254,14 @@ public:
   virtual bool DataReceived(const void *data, size_t length, struct NMEAInfo &info) override;
 };
 
-// Little helpers for me
-//size_t = long unsigned int
-//unit16_t = unsigned short int
-//uint8_t = unsigned char
-//TCHAR = char
-
-/*
- * Converting to a hex string for a useful output
- */
-uint8_t AR62xxDevice::toHexString(const void* data, size_t size) {
-  uint8_t szHex = 0;
-  constexpr TCHAR hex_chars[16] = {
-          _T('0'), _T('1'), _T('2'), _T('3'), _T('4'), _T('5'), _T('6'), _T('7'),
-          _T('8'), _T('9'), _T('A'), _T('B'), _T('C'), _T('D'), _T('E'), _T('F')
-  };
-  const uint8_t* p = static_cast < const uint8_t* > (data);
-  const uint8_t* pend = p + size;
-  for(;p < pend; ++p) {
-    szHex += (hex_chars[((*p) & 0xF0) >> 4]);
-    szHex += (hex_chars[((*p) & 0x0F) >> 0]);
-    szHex += ' ';
-  }
-  return szHex;
-}
-
 /*
  * Constructor
  * Port on which the radio is connected
  */
-AR62xxDevice::AR62xxDevice(Port &_port) : port(_port) {
-  response = ACK;
-  RadioPara.Enabled8_33 = true;
+AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
+{
+  response = ACKNOWLEDGED;
+  RadioPara.enabled_8_33 = true;
 }
 
 /**
@@ -259,42 +280,49 @@ AR62xxDevice::AR62xxDevice(Port &_port) : port(_port) {
  * The initial frequency settings of the radio a delivered by this method and stored in the data struct "info"
  * every time connection is established
  */
-bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInfo &info) {
+bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInfo &info)
+{
   assert(_data != nullptr);
   assert(length > 0);
   const uint8_t *data = (const uint8_t *)_data;
-  bool doneok = AR620xParseString((const char *)data, length);
+  bool data_received = AR620xParseString((const char *)data, length);
   info.alive.Update(info.clock);
-  return doneok;
+  return data_received;
 }
 
 /*
  * Writes the message to the serial port on which the radio is connected
  */
-bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env) {
+bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env)
+{
   //! Number of tries to send a message
-  unsigned retries = NR_RETRIES; // i.e. 3 retries
+  // i.e. 3 retries
+  unsigned retries = NR_RETRIES; 
   assert(msg_size > 0);
-  do {
-    bSending = true;
+  do
+  {
+    sending = true;
     response_mutex.lock();
-    response = NO_RSP;
+    response = NO_RESPONSE_YET;
     response_mutex.unlock();
     // Send the message
-    if (!port.FullWrite(msg, msg_size, env, std::chrono::seconds(CMD_TIMEOUT))){
-      bSending = false;
-      response = NAK;
-    } else {
-      response = ACK;
+    if (!port.FullWrite(msg, msg_size, env, std::chrono::seconds(CMD_TIMEOUT)))
+    {
+      sending = false;
+      response = NOT_ACKNOWLEDGED;
+    }
+    else
+    {
+      response = ACKNOWLEDGED;
     }
     // Wait for the response
     response_mutex.lock();
     rx_cond.wait_for(response_mutex, std::chrono::seconds(CMD_TIMEOUT));
-    
+
     auto _response = response;
     response_mutex.unlock();
-    bSending = false;
-    if (_response == ACK)
+    sending = false;
+    if (_response == ACKNOWLEDGED)
       // ACK received, finish, all went well
       return true;
 
@@ -307,71 +335,154 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
 /*
  * Creates a correct frequency-number to show
  */
-double AR62xxDevice::Idx2Freq(uint16_t uFreqIdx) {
-  double fFreq= 118.000 + (uFreqIdx & 0xFFF0) * (137.000-118.000)/3040.0;
-  switch(uFreqIdx & 0xF){
-    case 0:  fFreq += 0.000; break;
-    case 1:  fFreq += 0.005; break;
-    case 2:  fFreq += 0.010; break;
-    case 3:  fFreq += 0.015; break;
-    case 4:  fFreq += 0.025; break;
-    case 5:  fFreq += 0.030; break;
-    case 6:  fFreq += 0.035; break;
-    case 7:  fFreq += 0.040; break;
-    case 8:  fFreq += 0.050; break;
-    case 9:  fFreq += 0.055; break;
-    case 10: fFreq += 0.060; break;
-    case 11: fFreq += 0.065; break;
-    case 12: fFreq += 0.075; break;
-    case 13: fFreq += 0.080; break;
-    case 14: fFreq += 0.085; break;
-    case 15: fFreq += 0.090; break;
+double AR62xxDevice::IdxToFrequency(uint16_t frequency_idx)
+{
+  double min_frequency = 118.000;
+  double max_frequency = 137.000;
+  double frequencyRange = max_frequency - min_frequency;
+
+  //set first 3 digits of frequency (xxx.000)
+  double frequency = min_frequency + (frequency_idx & 0xFFF0) * frequencyRange / 3040.0;
+
+  //set last 3 digits of frequency (000.xxx)
+  switch (frequency_idx & 0xF)
+  {
+  case 0:
+    frequency += 0.000;
+    break;
+  case 1:
+    frequency += 0.005;
+    break;
+  case 2:
+    frequency += 0.010;
+    break;
+  case 3:
+    frequency += 0.015;
+    break;
+  case 4:
+    frequency += 0.025;
+    break;
+  case 5:
+    frequency += 0.030;
+    break;
+  case 6:
+    frequency += 0.035;
+    break;
+  case 7:
+    frequency += 0.040;
+    break;
+  case 8:
+    frequency += 0.050;
+    break;
+  case 9:
+    frequency += 0.055;
+    break;
+  case 10:
+    frequency += 0.060;
+    break;
+  case 11:
+    frequency += 0.065;
+    break;
+  case 12:
+    frequency += 0.075;
+    break;
+  case 13:
+    frequency += 0.080;
+    break;
+  case 14:
+    frequency += 0.085;
+    break;
+  case 15:
+    frequency += 0.090;
+    break;
   }
-  return (fFreq);
+  return frequency;
 }
 
 /*
  * Creates the correct index for a given readable frequency
  */
-uint16_t AR62xxDevice::Frq2Idx(double fFreq) {
-  uint16_t  uFreIdx= Freq2Idx(fFreq);
-  uFreIdx &= 0xFFF0;
-  uint8_t uiFrac = ((int)(fFreq*1000.0+0.5)) - (((int)(fFreq *10.0))*100);
-  switch(uiFrac) {
-    case 0:   uFreIdx += 0;  break;
-    case 5:   uFreIdx += 1;  break;
-    case 10:  uFreIdx += 2;  break;
-    case 15:  uFreIdx += 3;  break;
-    case 25:  uFreIdx += 4;  break;
-    case 30:  uFreIdx += 5;  break;
-    case 35:  uFreIdx += 6;  break;
-    case 40:  uFreIdx += 7;  break;
-    case 50:  uFreIdx += 8;  break;
-    case 55:  uFreIdx += 9;  break;
-    case 60:  uFreIdx += 10; break;
-    case 65:  uFreIdx += 11; break;
-    case 75:  uFreIdx += 12; break;
-    case 80:  uFreIdx += 13; break;
-    case 85:  uFreIdx += 14; break;
-    case 90:  uFreIdx += 15; break;
-    case 100: uFreIdx += 0;  break;
-    default:   break;
+uint16_t AR62xxDevice::FrequencyToIdx(double frequency)
+{
+  uint16_t frequency_idx = (int)(((frequency)-118.0) * 3040 / (137.00 - 118.0) + 0.5);
+  frequency_idx &= 0xFFF0;
+  uint8_t uiFrac = ((int)(frequency * 1000.0 + 0.5)) - (((int)(frequency * 10.0)) * 100);
+  switch (uiFrac)
+  {
+  case 0:
+    frequency_idx += 0;
+    break;
+  case 5:
+    frequency_idx += 1;
+    break;
+  case 10:
+    frequency_idx += 2;
+    break;
+  case 15:
+    frequency_idx += 3;
+    break;
+  case 25:
+    frequency_idx += 4;
+    break;
+  case 30:
+    frequency_idx += 5;
+    break;
+  case 35:
+    frequency_idx += 6;
+    break;
+  case 40:
+    frequency_idx += 7;
+    break;
+  case 50:
+    frequency_idx += 8;
+    break;
+  case 55:
+    frequency_idx += 9;
+    break;
+  case 60:
+    frequency_idx += 10;
+    break;
+  case 65:
+    frequency_idx += 11;
+    break;
+  case 75:
+    frequency_idx += 12;
+    break;
+  case 80:
+    frequency_idx += 13;
+    break;
+  case 85:
+    frequency_idx += 14;
+    break;
+  case 90:
+    frequency_idx += 15;
+    break;
+  case 100:
+    frequency_idx += 0;
+    break;
+  default:
+    break;
   }
-  return (uFreIdx);
+  return (frequency_idx);
 }
 
 /*
  * Creates the binary value for the protocol for the radio
  */
-static uint16_t CRCBitwise(uint8_t *data, size_t len) {
+static uint16_t CRCBitwise(uint8_t *data, size_t len)
+{
   uint16_t crc = 0x0000;
   size_t j;
   int i;
-  for (j=len; j>0; j--) {
+  for (j = len; j > 0; j--)
+  {
     crc ^= (uint16_t)(*data++) << 8;
-    for (i=0; i<8; i++) {
-      if (crc & 0x8000) crc = (crc<<1) ^ 0x8005;
-      else crc <<= 1;
+    for (i = 0; i < 8; i++)
+    {
+      if (crc & 0x8000)
+        crc = (crc << 1) ^ 0x8005;
+      else
+        crc <<= 1;
     }
   }
   return (crc);
@@ -390,36 +501,46 @@ static uint16_t CRCBitwise(uint8_t *data, size_t len) {
  * Station is not used in the moment, AR62xx does not read it yet
  *
  *****************************************************************************/
-int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double fFrequency, const TCHAR* Station) {
+int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double fFrequency, const TCHAR *Station)
+{
   unsigned int len = 0;
-  assert(Station !=NULL);
-  assert(Command !=NULL);
-  if(Command == NULL ) {
+  assert(Station != NULL);
+  assert(Command != NULL);
+  if (Command == NULL)
+  {
     return false;
   }
   //converting both actual frequencies
-  IntConvertStruct ActiveFreqIdx;  ActiveFreqIdx.intVal16  = Frq2Idx(RadioPara.ActiveFrequency);
-  IntConvertStruct PassiveFreqIdx; PassiveFreqIdx.intVal16 = Frq2Idx(RadioPara.PassiveFrequency);
-  Command [len++] = HEADER_ID ;
-  Command [len++] = PROTID ;
-  Command [len++] = 5;
-  switch (Active_Passive) { //converting the frequency which is to be changed
-    case ACTIVE_STATION:
-      ActiveFreqIdx.intVal16 = Frq2Idx(fFrequency);
+  IntConvertStruct ActiveFreqIdx;
+  ActiveFreqIdx.int_val_16 = FrequencyToIdx(RadioPara.active_frequency);
+  IntConvertStruct PassiveFreqIdx;
+  PassiveFreqIdx.int_val_16 = FrequencyToIdx(RadioPara.passive_frequency);
+  Command[len++] = HEADER_ID;
+  Command[len++] = PROT_ID;
+  Command[len++] = 5;
+  switch (Active_Passive)
+  {
+    //converting the frequency which is to be changed
+  case ACTIVE_STATION:
+    ActiveFreqIdx.int_val_16 = FrequencyToIdx(fFrequency);
     break;
-    default:
-    case PASSIVE_STATION:
-      PassiveFreqIdx.intVal16 =  Frq2Idx(fFrequency);
+  default:
+  case PASSIVE_STATION:
+    PassiveFreqIdx.int_val_16 = FrequencyToIdx(fFrequency);
     break;
   }
-  Command [len++] = 22; //setting frequencies -command byte in the protocol of the radio
-  Command [len++] = ActiveFreqIdx.intVal8[1];
-  Command [len++] = ActiveFreqIdx.intVal8[0];
-  Command [len++] = PassiveFreqIdx.intVal8[1];
-  Command [len++] = PassiveFreqIdx.intVal8[0];
-  CRC.intVal16 =  CRCBitwise(Command, len); //Creating the binary value
-  Command [len++] = CRC.intVal8[1];
-  Command [len++] = CRC.intVal8[0];
+
+  //setting frequencies -command byte in the protocol of the radio
+  Command[len++] = 22;
+  Command[len++] = ActiveFreqIdx.int_val_8[1];
+  Command[len++] = ActiveFreqIdx.int_val_8[0];
+  Command[len++] = PassiveFreqIdx.int_val_8[1];
+  Command[len++] = PassiveFreqIdx.int_val_8[0];
+
+  //Creating the binary value
+  crc.int_val_16 = CRCBitwise(Command, len);
+  Command[len++] = crc.int_val_8[1];
+  Command[len++] = crc.int_val_8[0];
   return len;
 }
 
@@ -427,11 +548,12 @@ int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double 
  * Called by "PutActiveFrequency"
  * doing the real work
  */
-bool AR62xxDevice::AR620xPutFreqActive(double Freq, const TCHAR* StationName, OperationEnvironment &env) {
+bool AR62xxDevice::AR620xPutFreqActive(double Freq, const TCHAR *StationName, OperationEnvironment &env)
+{
   int len;
-  uint8_t  szTmp[MAX_CMD_LEN];
-  len = SetAR620xStation(szTmp ,ACTIVE_STATION, Freq, StationName);
-  bool isSend = Send((uint8_t *) &szTmp, len /*sizeof(szTmp)*/, env);  //len seems to be ok!
+  uint8_t szTmp[MAX_CMD_LEN];
+  len = SetAR620xStation(szTmp, ACTIVE_STATION, Freq, StationName);
+  bool isSend = Send((uint8_t *)&szTmp, len /*sizeof(szTmp)*/, env); //len seems to be ok!
   return isSend;
 }
 
@@ -439,55 +561,68 @@ bool AR62xxDevice::AR620xPutFreqActive(double Freq, const TCHAR* StationName, Op
  * Called by "PutStandbyFrequency"
  * doing the real work
  */
-bool AR62xxDevice::AR620xPutFreqStandby(double Freq, const TCHAR* StationName, OperationEnvironment &env) {
+bool AR62xxDevice::AR620xPutFreqStandby(double Freq, const TCHAR *StationName, OperationEnvironment &env)
+{
   int len;
-  uint8_t  szTmp[MAX_CMD_LEN] = {};
-  len = SetAR620xStation(szTmp ,PASSIVE_STATION, Freq, StationName);
-  return Send((uint8_t *) &szTmp, len, env);
+  uint8_t szTmp[MAX_CMD_LEN] = {};
+  len = SetAR620xStation(szTmp, PASSIVE_STATION, Freq, StationName);
+  return Send((uint8_t *)&szTmp, len, env);
 }
 
 /*
  * Parses the messages which XCSoar receives from the radio.
  */
-bool AR62xxDevice::AR620xParseString(const char *String, size_t len) {
+bool AR62xxDevice::AR620xParseString(const char *String, size_t len)
+{
   size_t cnt = 0;
   uint16_t CalCRC = 0;
-  static  uint16_t Recbuflen = 0;
+  static uint16_t Recbuflen = 0;
   int CommandLength = 0;
-  #define REC_BUFSIZE 127
+#define REC_BUFSIZE 127
   static uint8_t Command[REC_BUFSIZE];
 
-  if(String == NULL) return 0;
-  if(len == 0) return 0;
+  if (String == NULL)
+    return 0;
+  if (len == 0)
+    return 0;
 
-  while (cnt < len) {
-    if((uint8_t)String[cnt] == HEADER_ID) Recbuflen =0;
-    if(Recbuflen >= REC_BUFSIZE) Recbuflen =0;
+  while (cnt < len)
+  {
+    if ((uint8_t)String[cnt] == HEADER_ID)
+      Recbuflen = 0;
+    if (Recbuflen >= REC_BUFSIZE)
+      Recbuflen = 0;
     assert(Recbuflen < REC_BUFSIZE);
 
-    Command[Recbuflen++] = (uint8_t) String[cnt++];
-    if(Recbuflen == 2){
-      if(!(Command[Recbuflen-1] == 0x14)){
+    Command[Recbuflen++] = (uint8_t)String[cnt++];
+    if (Recbuflen == 2)
+    {
+      if (!(Command[Recbuflen - 1] == 0x14))
+      {
         Recbuflen = 0;
       }
     }
 
-    if(Recbuflen >= 3){
+    if (Recbuflen >= 3)
+    {
       CommandLength = Command[2];
-      if(Recbuflen >= (CommandLength+5) ) {// all received
-        CRC.intVal8[1] =  Command[CommandLength+3];
-        CRC.intVal8[0] =  Command[CommandLength+4];
-        CalCRC =CRCBitwise(Command, CommandLength+3);
-        if(CalCRC == CRC.intVal16 || CRC.intVal16 == 0) {
-          if(!bSending) {
-            AR620x_Convert_Answer(Command, CommandLength+5, CalCRC);
+      if (Recbuflen >= (CommandLength + 5))
+      { // all received
+        crc.int_val_8[1] = Command[CommandLength + 3];
+        crc.int_val_8[0] = Command[CommandLength + 4];
+        CalCRC = CRCBitwise(Command, CommandLength + 3);
+        if (CalCRC == crc.int_val_16 || crc.int_val_16 == 0)
+        {
+          if (!sending)
+          {
+            AR620x_Convert_Answer(Command, CommandLength + 5, CalCRC);
           }
         }
         Recbuflen = 0;
       }
     }
   }
-  return  RadioPara.Changed;
+  return RadioPara.changed;
 }
 
 /*****************************************************************************
@@ -498,103 +633,117 @@ bool AR62xxDevice::AR620xParseString(const char *String, size_t len) {
  * szCommand      AR620x binary code to be converted, representing the state of a function (dual scan, squelsh, act. freq., pass. freq., ...)
  * len            length of the AR620x binary code to be converted
  ****************************************************************************/
-int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CRC){
-  if(szCommand == NULL) return 0;
-  if(len == 0)          return 0;
+int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CRC)
+{
+  if (szCommand == NULL)
+    return 0;
+  if (len == 0)
+    return 0;
 
-  static uint16_t uiLastChannelCRC =0;
-  static uint16_t uiVolumeCRC      =0;
-  static uint16_t uiVersionCRC     =0;
-  static uint16_t uiStatusCRC      =0;
-  static uint16_t uiSquelchCRC     =0;
-  static uint16_t uiRxStatusCRC    =0;
+  static uint16_t uiLastChannelCRC = 0;
+  static uint16_t uiVolumeCRC = 0;
+  static uint16_t uiVersionCRC = 0;
+  static uint16_t uiStatusCRC = 0;
+  static uint16_t uiSquelchCRC = 0;
+  static uint16_t uiRxStatusCRC = 0;
 #ifdef RADIO_VOLTAGE
-  static uint16_t uiVoltageCRC     =0;
+  static uint16_t uiVoltageCRC = 0;
 #endif
   uint32_t ulState;
-  int processed=0;
+  int processed = 0;
 
-  assert(szCommand !=NULL);
+  assert(szCommand != NULL);
 
-  switch ((unsigned char)(szCommand[3] & 0x7F)){
-    case 0:
-      if(uiVersionCRC!= CRC)  {
-         uiVersionCRC = CRC;
-         //LogFormat(_T("AR620x Version %u"), CRC);
-       }
+  switch ((unsigned char)(szCommand[3] & 0x7F))
+  {
+  case 0:
+    if (uiVersionCRC != CRC)
+    {
+      uiVersionCRC = CRC;
+      //LogFormat(_T("AR620x Version %u"), CRC);
+    }
     break;
-    case 3: //Volume settings
-      if(uiVolumeCRC != CRC){
-        uiVolumeCRC = CRC;
-        RadioPara.Changed = true;
-        RadioPara.Volume = (50-(int)szCommand[4])/5;
-      }
+  case 3: //Volume settings
+    if (uiVolumeCRC != CRC)
+    {
+      uiVolumeCRC = CRC;
+      RadioPara.changed = true;
+      RadioPara.radio_volume = (50 - (int)szCommand[4]) / 5;
+    }
     break;
-    case 4: //Squelsh settings
-      if(uiSquelchCRC!= CRC){
-        uiSquelchCRC = CRC;
-        RadioPara.Changed = true;
-        RadioPara.Squelch = (int)(szCommand[4]-6)/2+1;  // 6 + (Squelch-1)*2
-      }
+  case 4: //Squelsh settings
+    if (uiSquelchCRC != CRC)
+    {
+      uiSquelchCRC = CRC;
+      RadioPara.changed = true;
+      RadioPara.squelch = (int)(szCommand[4] - 6) / 2 + 1; // 6 + (Squelch-1)*2
+    }
     break;
-    case 12: //Dual scan settings
-      if(uiStatusCRC != CRC){
-        uiStatusCRC = CRC;
-        RadioPara.Changed = true;
-        sStatus.intVal8[1] = szCommand[4] ;
-        sStatus.intVal8[0] = szCommand[5] ;
-        if(sStatus.intVal16 & DUAL)
-          RadioPara.Dual = true;
-        else
-          RadioPara.Dual = false;
-      }
+  case 12: //Dual scan settings
+    if (uiStatusCRC != CRC)
+    {
+      uiStatusCRC = CRC;
+      RadioPara.changed = true;
+      status.int_val_8[1] = szCommand[4];
+      status.int_val_8[0] = szCommand[5];
+      if (status.int_val_16 & DUAL)
+        RadioPara.dual = true;
+      else
+        RadioPara.dual = false;
+    }
     break;
 #ifdef RADIO_VOLTAGE
-    case 21: // actual current of the radio
-      if(uiVoltageCRC != CRC) {
-        uiVoltageCRC = CRC;
-        GPS_INFO.ExtBatt2_Voltage =   8.5 + szCommand[4] *0.1;
-        RadioPara.Changed = true;
-      }
+  case 21: // actual current of the radio
+    if (uiVoltageCRC != CRC)
+    {
+      uiVoltageCRC = CRC;
+      GPS_INFO.ExtBatt2_Voltage = 8.5 + szCommand[4] * 0.1;
+      RadioPara.Changed = true;
+    }
     break;
 #endif
-    case 22: //Frequency settings, always for both frequencies (active and passive)
-      if(uiLastChannelCRC != CRC) {
-        uiLastChannelCRC = CRC;
-        RadioPara.Changed = true;
-        sFrequency.intVal8[1] = szCommand[4] ;
-        sFrequency.intVal8[0] = szCommand[5] ;
-        RadioPara.ActiveFrequency =  Idx2Freq(sFrequency.intVal16);
+  case 22: //Frequency settings, always for both frequencies (active and passive)
+    if (uiLastChannelCRC != CRC)
+    {
+      uiLastChannelCRC = CRC;
+      RadioPara.changed = true;
+      frequency.int_val_8[1] = szCommand[4];
+      frequency.int_val_8[0] = szCommand[5];
+      RadioPara.active_frequency = IdxToFrequency(frequency.int_val_16);
 
-        sFrequency.intVal8[1] = szCommand[6];
-        sFrequency.intVal8[0] = szCommand[7] ;
-        RadioPara.PassiveFrequency =  Idx2Freq(sFrequency.intVal16);
-        RadioPara.Changed = true;
-      }
+      frequency.int_val_8[1] = szCommand[6];
+      frequency.int_val_8[0] = szCommand[7];
+      RadioPara.passive_frequency = IdxToFrequency(frequency.int_val_16);
+      RadioPara.changed = true;
+    }
     break;
-    case 64: // general state information
-      if(uiRxStatusCRC != CRC) {
-        uiRxStatusCRC = CRC;
-        ulState = szCommand[4] << 24 | szCommand[5] << 16 | szCommand[6] << 8 | szCommand[7];
-        RadioPara.TX        = ((ulState & (BIT(5)| BIT(6))) > 0) ? true : false;
-        RadioPara.RX_active = ((ulState & BIT(7)) > 0)  ? true : false;
-        RadioPara.RX_standy = ((ulState & BIT(8)) > 0)  ? true : false;
-        RadioPara.RX        = (RadioPara.RX_active ||   RadioPara.RX_standy );
-        RadioPara.Changed = true;
-      }
+  case 64: // general state information
+    if (uiRxStatusCRC != CRC)
+    {
+      uiRxStatusCRC = CRC;
+      ulState = szCommand[4] << 24 | szCommand[5] << 16 | szCommand[6] << 8 | szCommand[7];
+      RadioPara.transmission_active = ((ulState & (BIT(5) | BIT(6))) > 0) ? true : false;
+      RadioPara.reception_on_active_station = ((ulState & BIT(7)) > 0) ? true : false;
+      RadioPara.reception_standby = ((ulState & BIT(8)) > 0) ? true : false;
+      RadioPara.reception_active = (RadioPara.reception_on_active_station || RadioPara.reception_standby);
+      RadioPara.changed = true;
+    }
     break;
-    default:
+  default:
     break;
   }
-  return processed;  /* return the number of converted characters */
+
+  /* return the number of converted characters */
+  return processed; 
 }
 
 /**
  * Sets the active frequency on the radio.
  */
 bool AR62xxDevice::PutActiveFrequency(RadioFrequency frequency,
-                               const TCHAR* name,
-                               OperationEnvironment &env) {
+                                      const TCHAR *name,
+                                      OperationEnvironment &env)
+{
   unsigned int ufreq = frequency.GetKiloHertz();
   double freq = ufreq / 1000.0;
   bool done = AR620xPutFreqActive(freq, (const TCHAR *)name, env);
@@ -605,8 +754,9 @@ bool AR62xxDevice::PutActiveFrequency(RadioFrequency frequency,
  * Sets the standby (passive) frequency on the radio.
  */
 bool AR62xxDevice::PutStandbyFrequency(RadioFrequency frequency,
-                                const TCHAR *name,
-                                OperationEnvironment &env) {
+                                       const TCHAR *name,
+                                       OperationEnvironment &env)
+{
   unsigned int ufreq = frequency.GetKiloHertz();
   double freq = ufreq / 1000.0;
   bool done = AR620xPutFreqStandby(freq, (const TCHAR *)name, env);
@@ -616,18 +766,17 @@ bool AR62xxDevice::PutStandbyFrequency(RadioFrequency frequency,
 /*
  * Assign the selected port on Object construction
  */
-static Device *AR62xxCreateOnPort(const DeviceConfig &config, Port &comPort) {
-  Device *dev = new AR62xxDevice(comPort);
-  return dev;
+static Device *AR62xxCreateOnPort(const DeviceConfig &config, Port &comPort)
+{
+  return new AR62xxDevice(comPort);
 }
 
 /*
  * Driver registration in XCSoar, connect to a serial port
  */
 const struct DeviceRegister ar62xx_driver = {
-  _T("AR62xx"),
-  _T("AR62xx"),
-  DeviceRegister::NO_TIMEOUT | DeviceRegister::RAW_GPS_DATA,
-  AR62xxCreateOnPort,
+    _T("AR62xx"),
+    _T("AR62xx"),
+    DeviceRegister::NO_TIMEOUT | DeviceRegister::RAW_GPS_DATA,
+    AR62xxCreateOnPort,
 };
-
