@@ -65,7 +65,7 @@ typedef union {
   uint8_t intVal8[2];
 } IntConvertStruct;
 
-typedef struct Radio_t
+typedef struct
 {
   //active station frequency
   double active_frequency;
@@ -117,7 +117,7 @@ typedef struct Radio_t
 
   // Timeout while transmission (2Min)
   bool tx_timeout;
-};
+} Radio_t;
 
 IntConvertStruct crc;
 IntConvertStruct frequency;
