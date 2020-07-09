@@ -950,8 +950,7 @@ bool AR62xxDevice::PutActiveFrequency(RadioFrequency frequency,
 {
   unsigned int ufreq = frequency.GetKiloHertz();
   double freq = ufreq / 1000.0;
-  bool done = AR620xPutFreqActive(freq, (const TCHAR *)name, env);
-  return done;
+  return AR620xPutFreqActive(freq, (const TCHAR *)name, env);
 }
 
 /**
@@ -969,8 +968,7 @@ bool AR62xxDevice::PutStandbyFrequency(RadioFrequency frequency,
 {
   unsigned int ufreq = frequency.GetKiloHertz();
   double freq = ufreq / 1000.0;
-  bool done = AR620xPutFreqStandby(freq, (const TCHAR *)name, env);
-  return done;
+  return AR620xPutFreqStandby(freq, (const TCHAR *)name, env);
 }
 
 /**
@@ -982,8 +980,7 @@ bool AR62xxDevice::PutStandbyFrequency(RadioFrequency frequency,
  */
 static Device *AR62xxCreateOnPort(const DeviceConfig &config, Port &comPort)
 {
-  Device *dev = new AR62xxDevice(comPort);
-  return dev;
+  return new AR62xxDevice(comPort);
 }
 
 /**
