@@ -134,19 +134,19 @@ volatile bool is_sending = false;
 class AR62xxDevice final : public AbstractDevice
 {
 
-  //!< Command timeout
+  //!< command timeout
   static constexpr auto CMD_TIMEOUT = std::chrono::milliseconds(250);
 
   //!< Number of tries to send a command.
   static constexpr unsigned MAX_RETRIES = 3;
 
-  //!< Command start character.
+  //!< command start character.
   static constexpr char STX = 0x02;
 
-  //!< Command acknowledged character.
+  //!< command acknowledged character.
   static constexpr char ACK = 0x06;
 
-  //!< Command not acknowledged character.
+  //!< command not acknowledged character.
   static constexpr char NAK = 0x15;
 
   //!< No response received yet.
@@ -199,32 +199,32 @@ private:
   /**
    * @brief Called by "PutActiveFrequency" doing the real work
    * 
-   * @param Freq 
-   * @param StationName 
+   * @param frequency 
+   * @param station_name 
    * @param env 
    * @return true 
    * @return false 
    */
-  bool AR620xPutFreqActive(double Freq, const TCHAR *StationName, OperationEnvironment &env);
+  bool AR620xPutFreqActive(double frequency, const TCHAR *station_name, OperationEnvironment &env);
 
   /**
    * @brief Called by "PutStandbyFrequency" doing the real work
    * 
-   * @param Freq 
-   * @param StationName 
+   * @param frequency 
+   * @param station_name 
    * @param env 
    * @return true 
    * @return false 
    */
-  bool AR620xPutFreqStandby(double Freq, const TCHAR *StationName, OperationEnvironment &env);
+  bool AR620xPutFreqStandby(double frequency, const TCHAR *station_name, OperationEnvironment &env);
 
   /**
    * @brief Creates the correct index for a given readable frequency
    * 
-   * @param fFreq 
+   * @param frequency 
    * @return uint16_t 
    */
-  uint16_t ConvertFrequencyToAR62FrequencyId(double fFreq);
+  uint16_t ConvertFrequencyToAR62FrequencyId(double frequency);
 
   /**
    * @brief Creates a correct frequency-number given by the index
@@ -237,33 +237,33 @@ private:
   /**
    * @brief This function sets the station name and frequency on the AR62xx
    * 
-   * @param Command 
-   * @param Active_Passive 
-   * @param fFrequency 
-   * @param Station 
+   * @param command 
+   * @param active_passive 
+   * @param frequency 
+   * @param station 
    * @return int 
    */
-  int SetAR620xStation(uint8_t *Command, int Active_Passive, double fFrequency, const TCHAR *Station);
+  int SetAR620xStation(uint8_t *command, int active_passive, double frequency, const TCHAR *station);
 
   /**
    * @brief Parses the messages which XCSoar receives from the radio.
    * 
-   * @param String 
+   * @param string 
    * @param len 
    * @return true 
    * @return false 
    */
-  bool AR620xParseString(const char *String, size_t len);
+  bool AR620xParseString(const char *string, size_t len);
 
   /**
    * @brief 
    * 
-   * @param szCommand 
+   * @param sz_command 
    * @param len 
-   * @param CRC 
+   * @param crc 
    * @return int 
    */
-  int AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CRC);
+  int AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t crc);
 
 public:
   /**
@@ -414,14 +414,14 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
     // message NOT sent
     if (!port.FullWrite(msg, msg_size, env, CMD_TIMEOUT))
     {
-      //if message could not be sent set response to "Command not acknowledged character"
+      //if message could not be sent set response to "command not acknowledged character"
       response = NAK;
     }
 
     //message sent
     else
     {
-      //if message could be sent set response to "Command acknowledged character"
+      //if message could be sent set response to "command acknowledged character"
       response = ACK;
     }
 
@@ -557,14 +557,14 @@ double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
 /**
  * @brief Creates the correct index for a given readable frequency
  * 
- * @param fFreq 
+ * @param frequency 
  * @return uint16_t 
  */
-uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(double fFreq)
+uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(double frequency)
 {
-  uint16_t frequency_id = (((fFreq)-118.0) * 3040 / (137.00 - 118.0) + 0.5);
+  uint16_t frequency_id = (((frequency)-118.0) * 3040 / (137.00 - 118.0) + 0.5);
   frequency_id &= 0xFFF0;
-  uint8_t channel = ((int)(fFreq * 1000.0 + 0.5)) - (((int)(fFreq * 10.0)) * 100);
+  uint8_t channel = ((int)(frequency * 1000.0 + 0.5)) - (((int)(frequency * 10.0)) * 100);
   switch (channel)
   {
   case 0:
@@ -654,22 +654,22 @@ static uint16_t CRCBitwise(uint8_t *data, size_t len)
  * @brief This function sets the station name and frequency on the AR62xx
  * 
  * The AR62xx always sends and receives both frequencies. the one which remains unchanged
- * is controlled by the "Active_Passive"-flag
+ * is controlled by the "active_passive"-flag
  *
- * Station is not used in the moment, AR62xx does not read it yet
+ * station is not used in the moment, AR62xx does not read it yet
  * 
- * @param Command 
- * @param Active_Passive Active or passive station switch
- * @param fFrequency station frequency
- * @param Station station Name string
+ * @param command 
+ * @param active_passive Active or passive station switch
+ * @param frequency station frequency
+ * @param station station Name string
  * @return int 
  */
-int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double fFrequency, const TCHAR *Station)
+int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, double frequency, const TCHAR *station)
 {
   unsigned int len = 0;
-  assert(Station != NULL);
-  assert(Command != NULL);
-  if (Command == NULL)
+  assert(station != NULL);
+  assert(command != NULL);
+  if (command == NULL)
   {
     return false;
   }
@@ -678,33 +678,33 @@ int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double 
   ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(radio.active_frequency);
   IntConvertStruct PassiveFreqIdx;
   PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(radio.passive_frequency);
-  Command[len++] = HEADER_ID;
-  Command[len++] = PROTID;
-  Command[len++] = 5;
+  command[len++] = HEADER_ID;
+  command[len++] = PROTID;
+  command[len++] = 5;
 
   //converting the frequency which is to be changed
-  switch (Active_Passive)
+  switch (active_passive)
   {
   case ACTIVE_STATION:
-    ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(fFrequency);
+    ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(frequency);
     break;
   default:
   case PASSIVE_STATION:
-    PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(fFrequency);
+    PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(frequency);
     break;
   }
 
   //setting frequencies -command byte in the protocol of the radio
-  Command[len++] = 22;
-  Command[len++] = ActiveFreqIdx.intVal8[1];
-  Command[len++] = ActiveFreqIdx.intVal8[0];
-  Command[len++] = PassiveFreqIdx.intVal8[1];
-  Command[len++] = PassiveFreqIdx.intVal8[0];
+  command[len++] = 22;
+  command[len++] = ActiveFreqIdx.intVal8[1];
+  command[len++] = ActiveFreqIdx.intVal8[0];
+  command[len++] = PassiveFreqIdx.intVal8[1];
+  command[len++] = PassiveFreqIdx.intVal8[0];
 
   //Creating the binary value
-  crc.intVal16 = CRCBitwise(Command, len);
-  Command[len++] = crc.intVal8[1];
-  Command[len++] = crc.intVal8[0];
+  crc.intVal16 = CRCBitwise(command, len);
+  command[len++] = crc.intVal8[1];
+  command[len++] = crc.intVal8[0];
   return len;
 }
 
@@ -713,17 +713,17 @@ int AR62xxDevice::SetAR620xStation(uint8_t *Command, int Active_Passive, double 
  * 
  * doing the real work
  * 
- * @param Freq 
- * @param StationName 
+ * @param frequency 
+ * @param station_name 
  * @param env 
  * @return true 
  * @return false 
  */
-bool AR62xxDevice::AR620xPutFreqActive(double Freq, const TCHAR *StationName, OperationEnvironment &env)
+bool AR62xxDevice::AR620xPutFreqActive(double frequency, const TCHAR *station_name, OperationEnvironment &env)
 {
   int len;
   uint8_t szTmp[MAX_CMD_LEN];
-  len = SetAR620xStation(szTmp, ACTIVE_STATION, Freq, StationName);
+  len = SetAR620xStation(szTmp, ACTIVE_STATION, frequency, station_name);
   bool isSend = Send((uint8_t *)&szTmp, len, env);
   return isSend;
 }
@@ -732,17 +732,17 @@ bool AR62xxDevice::AR620xPutFreqActive(double Freq, const TCHAR *StationName, Op
  * @brief Called by "PutStandbyFrequency"
  * Called by "PutStandbyFrequency"
  * doing the real work
- * @param Freq 
- * @param StationName 
+ * @param frequency 
+ * @param station_name 
  * @param env 
  * @return true 
  * @return false 
  */
-bool AR62xxDevice::AR620xPutFreqStandby(double Freq, const TCHAR *StationName, OperationEnvironment &env)
+bool AR62xxDevice::AR620xPutFreqStandby(double frequency, const TCHAR *station_name, OperationEnvironment &env)
 {
   int len;
   uint8_t szTmp[MAX_CMD_LEN] = {};
-  len = SetAR620xStation(szTmp, PASSIVE_STATION, Freq, StationName);
+  len = SetAR620xStation(szTmp, PASSIVE_STATION, frequency, station_name);
   bool isSend = Send((uint8_t *)&szTmp, len, env);
   return isSend;
 }
@@ -750,37 +750,37 @@ bool AR62xxDevice::AR620xPutFreqStandby(double Freq, const TCHAR *StationName, O
 /**
  * @brief Parses the messages which XCSoar receives from the radio.
  * 
- * @param String 
+ * @param string 
  * @param len 
  * @return true 
  * @return false 
  */
-bool AR62xxDevice::AR620xParseString(const char *String, size_t len)
+bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
 {
   size_t cnt = 0;
   uint16_t CalCRC = 0;
   static uint16_t Recbuflen = 0;
   int CommandLength = 0;
 #define REC_BUFSIZE 127
-  static uint8_t Command[REC_BUFSIZE];
+  static uint8_t command[REC_BUFSIZE];
 
-  if (String == NULL)
+  if (string == NULL)
     return 0;
   if (len == 0)
     return 0;
 
   while (cnt < len)
   {
-    if ((uint8_t)String[cnt] == HEADER_ID)
+    if ((uint8_t)string[cnt] == HEADER_ID)
       Recbuflen = 0;
     if (Recbuflen >= REC_BUFSIZE)
       Recbuflen = 0;
     assert(Recbuflen < REC_BUFSIZE);
 
-    Command[Recbuflen++] = (uint8_t)String[cnt++];
+    command[Recbuflen++] = (uint8_t)string[cnt++];
     if (Recbuflen == 2)
     {
-      if (!(Command[Recbuflen - 1] == 0x14))
+      if (!(command[Recbuflen - 1] == 0x14))
       {
         Recbuflen = 0;
       }
@@ -788,19 +788,19 @@ bool AR62xxDevice::AR620xParseString(const char *String, size_t len)
 
     if (Recbuflen >= 3)
     {
-      CommandLength = Command[2];
+      CommandLength = command[2];
 
       // all received
       if (Recbuflen >= (CommandLength + 5))
       {
-        crc.intVal8[1] = Command[CommandLength + 3];
-        crc.intVal8[0] = Command[CommandLength + 4];
-        CalCRC = CRCBitwise(Command, CommandLength + 3);
+        crc.intVal8[1] = command[CommandLength + 3];
+        crc.intVal8[0] = command[CommandLength + 4];
+        CalCRC = CRCBitwise(command, CommandLength + 3);
         if (CalCRC == crc.intVal16 || crc.intVal16 == 0)
         {
           if (!is_sending)
           {
-            AR620x_Convert_Answer(Command, CommandLength + 5, CalCRC);
+            AR620x_Convert_Answer(command, CommandLength + 5, CalCRC);
           }
         }
         Recbuflen = 0;
@@ -813,14 +813,14 @@ bool AR62xxDevice::AR620xParseString(const char *String, size_t len)
 /**
  * @brief this function converts a KRT answer sting to a NMEA answer
  * 
- * @param szCommand AR620x binary code to be converted, representing the state of a function (dual scan, squelsh, act. freq., pass. freq., ...)
+ * @param sz_command AR620x binary code to be converted, representing the state of a function (dual scan, squelsh, act. freq., pass. freq., ...)
  * @param len length of the AR620x binary code to be converted
- * @param CRC 
+ * @param crc 
  * @return int 
  */
-int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CRC)
+int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t crc)
 {
-  if (szCommand == NULL)
+  if (sz_command == NULL)
     return 0;
   if (len == 0)
     return 0;
@@ -839,45 +839,45 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
   uint32_t ulState;
   int processed = 0;
 
-  assert(szCommand != NULL);
+  assert(sz_command != NULL);
 
-  switch ((unsigned char)(szCommand[3] & 0x7F))
+  switch ((unsigned char)(sz_command[3] & 0x7F))
   {
   case 0:
-    if (uiVersionCRC != CRC)
+    if (uiVersionCRC != crc)
     {
-      uiVersionCRC = CRC;
+      uiVersionCRC = crc;
     }
     break;
 
   //Volume settings
   case 3:
-    if (uiVolumeCRC != CRC)
+    if (uiVolumeCRC != crc)
     {
-      uiVolumeCRC = CRC;
+      uiVolumeCRC = crc;
       radio.parameter_changed = true;
-      radio.radio_volume = (50 - (int)szCommand[4]) / 5;
+      radio.radio_volume = (50 - (int)sz_command[4]) / 5;
     }
     break;
 
   //Squelsh settings
   case 4:
-    if (uiSquelchCRC != CRC)
+    if (uiSquelchCRC != crc)
     {
-      uiSquelchCRC = CRC;
+      uiSquelchCRC = crc;
       radio.parameter_changed = true;
-      radio.radio_squelch = (int)(szCommand[4] - 6) / 2 + 1; // 6 + (Squelch-1)*2
+      radio.radio_squelch = (int)(sz_command[4] - 6) / 2 + 1; // 6 + (Squelch-1)*2
     }
     break;
 
   //Dual scan settings
   case 12:
-    if (uiStatusCRC != CRC)
+    if (uiStatusCRC != crc)
     {
-      uiStatusCRC = CRC;
+      uiStatusCRC = crc;
       radio.parameter_changed = true;
-      status.intVal8[1] = szCommand[4];
-      status.intVal8[0] = szCommand[5];
+      status.intVal8[1] = sz_command[4];
+      status.intVal8[0] = sz_command[5];
       if (status.intVal16 & DUAL)
         radio.dual_channel_active = true;
       else
@@ -888,10 +888,10 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
 
   // actual current of the radio
   case 21:
-    if (uiVoltageCRC != CRC)
+    if (uiVoltageCRC != crc)
     {
-      uiVoltageCRC = CRC;
-      GPS_INFO.ExtBatt2_Voltage = 8.5 + szCommand[4] * 0.1;
+      uiVoltageCRC = crc;
+      GPS_INFO.ExtBatt2_Voltage = 8.5 + sz_command[4] * 0.1;
       RadioPara.Changed = true;
     }
     break;
@@ -899,16 +899,16 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
 
   //Frequency settings, always for both frequencies (active and passive)
   case 22:
-    if (uiLastChannelCRC != CRC)
+    if (uiLastChannelCRC != crc)
     {
-      uiLastChannelCRC = CRC;
+      uiLastChannelCRC = crc;
       radio.parameter_changed = true;
-      frequency.intVal8[1] = szCommand[4];
-      frequency.intVal8[0] = szCommand[5];
+      frequency.intVal8[1] = sz_command[4];
+      frequency.intVal8[0] = sz_command[5];
       radio.active_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
 
-      frequency.intVal8[1] = szCommand[6];
-      frequency.intVal8[0] = szCommand[7];
+      frequency.intVal8[1] = sz_command[6];
+      frequency.intVal8[0] = sz_command[7];
       radio.passive_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
       radio.parameter_changed = true;
     }
@@ -916,10 +916,10 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *szCommand, int len, uint16_t CR
 
   // general state information
   case 64:
-    if (uiRxStatusCRC != CRC)
+    if (uiRxStatusCRC != crc)
     {
-      uiRxStatusCRC = CRC;
-      ulState = szCommand[4] << 24 | szCommand[5] << 16 | szCommand[6] << 8 | szCommand[7];
+      uiRxStatusCRC = crc;
+      ulState = sz_command[4] << 24 | sz_command[5] << 16 | sz_command[6] << 8 | sz_command[7];
       radio.tx = ((ulState & (BIT(5) | BIT(6))) > 0) ? true : false;
       radio.rx_active = ((ulState & BIT(7)) > 0) ? true : false;
       radio.rx_passive = ((ulState & BIT(8)) > 0) ? true : false;
