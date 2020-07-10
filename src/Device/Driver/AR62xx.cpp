@@ -48,7 +48,7 @@ Copyright_License {
 
 #include <stdio.h>
 
-//constants, expressions, defines for AR62xx radios binary protocol
+//!< constants, expressions, defines for AR62xx radios binary protocol
 constexpr uint8_t HEADER_ID = 0xA5;
 #define PROTID 0x14;
 #define QUERY BIT(7)
@@ -67,24 +67,23 @@ typedef union {
 
 typedef struct
 {
-  
-  double active_frequency; //!< active station frequency
-  double passive_frequency; //!< passive (or standby) station frequency
+  double active_frequency;               //!< active station frequency
+  double passive_frequency;              //!< passive (or standby) station frequency
   TCHAR passive_station_name[NAME_SIZE]; //!< passive (or standby) station name
-  TCHAR active_station_name[NAME_SIZE]; //!< active station name
-  int radio_volume; //!< Radio Volume
-  int radio_squelch; //!< Radio Squelch
-  int intercom_volume; //!< Radio Intercom Volume
-  bool parameter_changed; //!< Parameter Changed Flag TRUE = parameter changed)
-  bool radio_enabled; //!< Radio Installed d Flag (TRUE = Radio found)
-  bool dual_channel_active; //!< Dual Channel mode active flag (TRUE = on)
-  bool enabled_8_33; //!< 8,33kHz Radio enabled (TRUE = 8,33kHz)
-  bool rx; //!< Radio reception active (TRUE = reception)
-  bool tx; //!< Radio transmission active (TRUE = transmission)
-  bool rx_active; //!< Radio reception on active station (TRUE = reception)
-  bool rx_passive; //!< Radio reception on passive (standby) station
-  bool low_bat; //!< Battery low flag (TRUE = Batt low)
-  bool tx_timeout; //!< Timeout while transmission (2Min)
+  TCHAR active_station_name[NAME_SIZE];  //!< active station name
+  int radio_volume;                      //!< Radio Volume
+  int radio_squelch;                     //!< Radio Squelch
+  int intercom_volume;                   //!< Radio Intercom Volume
+  bool parameter_changed;                //!< Parameter Changed Flag TRUE = parameter changed)
+  bool radio_enabled;                    //!< Radio Installed d Flag (TRUE = Radio found)
+  bool dual_channel_active;              //!< Dual Channel mode active flag (TRUE = on)
+  bool enabled_8_33;                     //!< 8,33kHz Radio enabled (TRUE = 8,33kHz)
+  bool rx;                               //!< Radio reception active (TRUE = reception)
+  bool tx;                               //!< Radio transmission active (TRUE = transmission)
+  bool rx_active;                        //!< Radio reception on active station (TRUE = reception)
+  bool rx_passive;                       //!< Radio reception on passive (standby) station
+  bool low_bat;                          //!< Battery low flag (TRUE = Batt low)
+  bool tx_timeout;                       //!< Timeout while transmission (2Min)
 } Radio;
 
 IntConvertStruct crc;
@@ -102,12 +101,12 @@ volatile bool is_sending = false;
 class AR62xxDevice final : public AbstractDevice
 {
   static constexpr auto CMD_TIMEOUT = std::chrono::milliseconds(250); //!< command timeout
-  static constexpr unsigned MAX_RETRIES = 3; //!< Number of tries to send a command.
-  static constexpr char STX = 0x02; //!< command start character.
-  static constexpr char ACK = 0x06; //!< command acknowledged character.
-  static constexpr char NAK = 0x15; //!< command not acknowledged character.
-  static constexpr char NO_RSP = 0; //!< No response received yet.
-  static constexpr size_t MAX_NAME_LENGTH = 10; //!< Max. radio station name length.
+  static constexpr unsigned MAX_RETRIES = 3;                          //!< Number of tries to send a command.
+  static constexpr char STX = 0x02;                                   //!< command start character.
+  static constexpr char ACK = 0x06;                                   //!< command acknowledged character.
+  static constexpr char NAK = 0x15;                                   //!< command not acknowledged character.
+  static constexpr char NO_RSP = 0;                                   //!< No response received yet.
+  static constexpr size_t MAX_NAME_LENGTH = 10;                       //!< Max. radio station name length.
 
 public:
   /**
@@ -118,14 +117,13 @@ public:
   AR62xxDevice(Port &_port);
 
 private:
-  Port &port; //!< Port the radio is connected to.
-  size_t expected_msg_length{}; //!< Expected length of the message just receiving.
+  Port &port;                             //!< Port the radio is connected to.
+  size_t expected_msg_length{};           //!< Expected length of the message just receiving.
   StaticFifoBuffer<uint8_t, 256u> rx_buf; //!< Buffer which receives the messages send from the radio.
-  uint8_t response; //!< Last response received from the radio.
-  Cond rx_cond; //!< Condition to signal that a response was received from the radio.
-  Mutex response_mutex; //! Mutex to be locked to access response.
-  Radio radio; //!< radio variable
-
+  uint8_t response;                       //!< Last response received from the radio.
+  Cond rx_cond;                           //!< Condition to signal that a response was received from the radio.
+  Mutex response_mutex;                   //!< Mutex to be locked to access response.
+  Radio radio;                            //!< radio variable
 
   /**
    * @brief Sends a message to the radio.
@@ -257,9 +255,9 @@ public:
 
 /**
  * @brief Compiler Workaround
- *Workaround for some GCC versions which don't inline the constexpr
+ * Workaround for some GCC versions which don't inline the constexpr
  * despite being defined so in C++17, see
- *  http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0386r2.pdf
+ * http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0386r2.pdf
  */
 #if GCC_OLDER_THAN(9, 0)
 constexpr std::chrono::milliseconds AR62xxDevice::CMD_TIMEOUT;
@@ -299,12 +297,12 @@ AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
  */
 bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInfo &info)
 {
-  
-  assert(_data != nullptr); //!< check that data is not empty (null)
-  assert(length > 0); //< the length of the data has to be greater than zero
-  const uint8_t *data = (const uint8_t *)_data; //!< cast data to int
+
+  assert(_data != nullptr);                                        //!< check that data is not empty (null)
+  assert(length > 0);                                              //< the length of the data has to be greater than zero
+  const uint8_t *data = (const uint8_t *)_data;                    //!< cast data to int
   bool data_is_ok = AR620xParseString((const char *)data, length); //!< if data can be parsed return true
-  info.alive.Update(info.clock); //!< send nmea info that we are receiving data
+  info.alive.Update(info.clock);                                   //!< send nmea info that we are receiving data
 
   /*
    * return
@@ -326,7 +324,7 @@ bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInf
 bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env)
 {
   unsigned retries = MAX_RETRIES; //!< Number of tries to send a message will be decreased on every retry
-  assert(msg_size > 0); //!< check that msg is not empty
+  assert(msg_size > 0);           //!< check that msg is not empty
 
   /*
    * try to send a message as long as number of max-retries is not reached
@@ -339,7 +337,7 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
       const std::lock_guard<Mutex> lock(response_mutex);
       response = NO_RSP; //!< initialize response with "No response received yet"
     }
-    
+
     is_sending = true; //!< set sending-flat
 
     //!< message NOT sent
@@ -399,12 +397,12 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
  */
 double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
 {
-  double min_frequency = 118.000; //!< the lowest frequency-number which can be set in AR62xx
-  double max_frequency = 137.000; //!< the highest frequency-number which can be set in AR62xx
-  double frequency_range = max_frequency - min_frequency; //!< the frequeny-range which can be set in the AR62xx
-  int frequency_bitmask = 0xFFF0; //!< bitmask to get the frequency
-  int channel_bitmask = 0xF; //!< bitmask to get the chanel
-  double raster = 3040.0; //!< raster-length
+  double min_frequency = 118.000;                                                                         //!< the lowest frequency-number which can be set in AR62xx
+  double max_frequency = 137.000;                                                                         //!< the highest frequency-number which can be set in AR62xx
+  double frequency_range = max_frequency - min_frequency;                                                 //!< the frequeny-range which can be set in the AR62xx
+  int frequency_bitmask = 0xFFF0;                                                                         //!< bitmask to get the frequency
+  int channel_bitmask = 0xF;                                                                              //!< bitmask to get the chanel
+  double raster = 3040.0;                                                                                 //!< raster-length
   double radio_frequency = min_frequency + (frequency_id & frequency_bitmask) * frequency_range / raster; //!< calculate frequency
 
   //!< get the channel out of the frequence_id
