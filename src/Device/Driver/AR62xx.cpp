@@ -85,7 +85,7 @@ typedef struct
   bool rx_passive; //!< Radio reception on passive (standby) station
   bool low_bat; //!< Battery low flag (TRUE = Batt low)
   bool tx_timeout; //!< Timeout while transmission (2Min)
-} Radio_t;
+} Radio;
 
 IntConvertStruct crc;
 IntConvertStruct frequency;
@@ -108,13 +108,6 @@ class AR62xxDevice final : public AbstractDevice
   static constexpr char NAK = 0x15; //!< command not acknowledged character.
   static constexpr char NO_RSP = 0; //!< No response received yet.
   static constexpr size_t MAX_NAME_LENGTH = 10; //!< Max. radio station name length.
-  Port &port; //!< Port the radio is connected to.
-  size_t expected_msg_length{}; //!< Expected length of the message just receiving.
-  StaticFifoBuffer<uint8_t, 256u> rx_buf; //!< Buffer which receives the messages send from the radio.
-  uint8_t response; //!< Last response received from the radio.
-  Cond rx_cond; //!< Condition to signal that a response was received from the radio.
-  Mutex response_mutex; //! Mutex to be locked to access response.
-  Radio_t radio; //!< radio variable
 
 public:
   /**
@@ -125,6 +118,15 @@ public:
   AR62xxDevice(Port &_port);
 
 private:
+  Port &port; //!< Port the radio is connected to.
+  size_t expected_msg_length{}; //!< Expected length of the message just receiving.
+  StaticFifoBuffer<uint8_t, 256u> rx_buf; //!< Buffer which receives the messages send from the radio.
+  uint8_t response; //!< Last response received from the radio.
+  Cond rx_cond; //!< Condition to signal that a response was received from the radio.
+  Mutex response_mutex; //! Mutex to be locked to access response.
+  Radio radio; //!< radio variable
+
+
   /**
    * @brief Sends a message to the radio.
    * 
@@ -253,9 +255,12 @@ public:
   virtual bool DataReceived(const void *data, size_t length, struct NMEAInfo &info) override;
 };
 
-/* Workaround for some GCC versions which don't inline the constexpr
-   despite being defined so in C++17, see
-   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0386r2.pdf */
+/**
+ * @brief Compiler Workaround
+ *Workaround for some GCC versions which don't inline the constexpr
+ * despite being defined so in C++17, see
+ *  http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0386r2.pdf
+ */
 #if GCC_OLDER_THAN(9, 0)
 constexpr std::chrono::milliseconds AR62xxDevice::CMD_TIMEOUT;
 #endif
@@ -402,9 +407,7 @@ double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
   double raster = 3040.0; //!< raster-length
   double radio_frequency = min_frequency + (frequency_id & frequency_bitmask) * frequency_range / raster; //!< calculate frequency
 
-  /*
-   * get the channel out of the 
-   */
+  //!< get the channel out of the frequence_id
   switch (frequency_id & channel_bitmask)
   {
   case 0:
@@ -578,7 +581,7 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, double 
   {
     return false;
   }
-  //converting both actual frequencies
+  //!< converting both actual frequencies
   IntConvertStruct ActiveFreqIdx;
   ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(radio.active_frequency);
   IntConvertStruct PassiveFreqIdx;
@@ -587,7 +590,7 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, double 
   command[len++] = PROTID;
   command[len++] = 5;
 
-  //converting the frequency which is to be changed
+  //!< converting the frequency which is to be changed
   switch (active_passive)
   {
   case ACTIVE_STATION:
@@ -599,14 +602,14 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, double 
     break;
   }
 
-  //setting frequencies -command byte in the protocol of the radio
+  //!< setting frequencies -command byte in the protocol of the radio
   command[len++] = 22;
   command[len++] = ActiveFreqIdx.intVal8[1];
   command[len++] = ActiveFreqIdx.intVal8[0];
   command[len++] = PassiveFreqIdx.intVal8[1];
   command[len++] = PassiveFreqIdx.intVal8[0];
 
-  //Creating the binary value
+  //!< Creating the binary value
   crc.intVal16 = CRCBitwise(command, len);
   command[len++] = crc.intVal8[1];
   command[len++] = crc.intVal8[0];
@@ -755,7 +758,7 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     }
     break;
 
-  //Volume settings
+  //!< Volume settings
   case 3:
     if (uiVolumeCRC != crc)
     {
@@ -765,7 +768,7 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     }
     break;
 
-  //Squelsh settings
+  //!< Squelsh settings
   case 4:
     if (uiSquelchCRC != crc)
     {
@@ -775,7 +778,7 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     }
     break;
 
-  //Dual scan settings
+  //!< Dual scan settings
   case 12:
     if (uiStatusCRC != crc)
     {
@@ -791,7 +794,7 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     break;
 #ifdef RADIO_VOLTAGE
 
-  // actual current of the radio
+  //!< actual current of the radio
   case 21:
     if (uiVoltageCRC != crc)
     {
@@ -802,7 +805,7 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     break;
 #endif
 
-  //Frequency settings, always for both frequencies (active and passive)
+  //!< Frequency settings, always for both frequencies (active and passive)
   case 22:
     if (uiLastChannelCRC != crc)
     {
@@ -819,7 +822,7 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     }
     break;
 
-  // general state information
+  //!< general state information
   case 64:
     if (uiRxStatusCRC != crc)
     {
@@ -836,7 +839,7 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     break;
   }
 
-  //return the number of converted characters
+  //!< return the number of converted characters
   return processed;
 }
 
