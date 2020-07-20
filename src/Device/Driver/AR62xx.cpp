@@ -60,6 +60,7 @@ constexpr uint8_t HEADER_ID = 0xA5;
 #define BIT(n) (1 << (n))
 #define NAME_SIZE 30
 
+
 typedef union {
   uint16_t intVal16;
   uint8_t intVal8[2];
@@ -468,8 +469,15 @@ double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
  */
 uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(double frequency)
 {
-  uint16_t frequency_id = (((frequency)-118.0) * 3040 / (137.00 - 118.0) + 0.5);
-  frequency_id &= 0xFFF0;
+
+  double min_frequency = 118.000;                                                                         //!< the lowest frequency-number which can be set in AR62xx
+  double max_frequency = 137.000;                                                                         //!< the highest frequency-number which can be set in AR62xx
+  double frequency_range = max_frequency - min_frequency;                                                 //!< the frequeny-range which can be set in the AR62xx
+  int frequency_bitmask = 0xFFF0;                                                                         //!< bitmask to get the frequency
+  double raster = 3040.0;                                                                                 //!< raster-length
+
+  uint16_t frequency_id = (((frequency)-min_frequency) * raster / frequency_range + 0.5);
+  frequency_id &= frequency_bitmask;
   uint8_t channel = ((int)(frequency * 1000.0 + 0.5)) - (((int)(frequency * 10.0)) * 100);
   switch (channel)
   {
