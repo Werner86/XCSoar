@@ -21,13 +21,6 @@ Copyright_License {
 }
 */
 
-/*
- * The driver is derived from the KRT2-driver. This version has implemented two methods yet:
- * IMPLEMENTED > setting the active frequency
- * IMPLEMENTED > setting the passive frequency
- *
- */
-
 #include "Device/Driver/AR62xx.hpp"
 #include "Device/Driver.hpp"
 #include "Device/Port/Port.hpp"
@@ -44,192 +37,62 @@ Copyright_License {
 
 #include <stdio.h>
 
-//!< constants, expressions, defines for AR62xx radios binary protocol
 constexpr uint8_t HEADER_ID = 0xA5;
-#define PROTID 0x14;
-#define QUERY 1 << 7
-#define DUAL 1 << 8
-#define SQUELCH 1 << 7
 #define MAX_CMD_LEN 128
 #define ACTIVE_STATION 1
 #define PASSIVE_STATION 0
-#define NAME_SIZE 30
-
 
 typedef union {
   uint16_t intVal16;
   uint8_t intVal8[2];
 } IntConvertStruct;
 
-
-/**
- * @brief AR62xx device class.
- * 
- * This class provides the interface to communicate with the AR62xx radio.
- * The driver retransmits messages in case of a failure.
- */
 class AR62xxDevice final : public AbstractDevice
 {
   static constexpr auto CMD_TIMEOUT = std::chrono::milliseconds(250); //!< command timeout
-  static constexpr unsigned MAX_RETRIES = 3;                          //!< Number of tries to send a command.
   static constexpr char STX = 0x02;                                   //!< command start character.
   static constexpr char ACK = 0x06;                                   //!< command acknowledged character.
   static constexpr char NAK = 0x15;                                   //!< command not acknowledged character.
   static constexpr char NO_RSP = 0;                                   //!< No response received yet.
-  static constexpr size_t MAX_NAME_LENGTH = 10;                       //!< Max. radio station name length.
 
 public:
-  /**
-   * @brief Constructor of the radio device class.
-   * 
-   * @param _port Port the radio is connected to.
-   */
   explicit AR62xxDevice(Port &_port);
 
 private:
-  Port &port;                             //!< Port the radio is connected to.
-  size_t expected_msg_length{};           //!< Expected length of the message just receiving.
-  StaticFifoBuffer<uint8_t, 256u> rx_buf; //!< Buffer which receives the messages send from the radio.
-  uint8_t response;                       //!< Last response received from the radio.
-  Cond rx_cond;                           //!< Condition to signal that a response was received from the radio.
-  Mutex response_mutex;                   //!< Mutex to be locked to access response.
+  Port &port;       //!< Port the radio is connected to.
+  uint8_t response; //!< Last response received from the radio.
+  Cond rx_cond;     //!< Condition to signal that a response was received from the radio.
 
   IntConvertStruct crc;
   IntConvertStruct frequency;
   IntConvertStruct status;
 
-  double active_frequency;               //!< active station frequency
-  double passive_frequency;              //!< passive (or standby) station frequency
-  bool parameter_changed;                //!< Parameter Changed Flag TRUE = parameter changed)
+  double active_frequency;  //!< active station frequency
+  double passive_frequency; //!< passive (or standby) station frequency
+  bool parameter_changed;   //!< Parameter Changed Flag TRUE = parameter changed)
 
   bool is_sending = false;
 
-
-  /**
-   * @brief Sends a message to the radio.
-   * 
-   * @param msg Message to be send to the radio. 
-   * @param msg_size 
-   * @param env 
-   * @return true 
-   * @return false 
-   */
   bool Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env);
 
-  /**
-   * @brief Called by "PutActiveFrequency" doing the real work
-   * 
-   * @param frequency 
-   * @param station_name 
-   * @param env 
-   * @return true 
-   * @return false 
-   */
-  bool AR620xPutFreqActive(double frequency, const TCHAR *station_name, OperationEnvironment &env);
-
-  /**
-   * @brief Called by "PutStandbyFrequency" doing the real work
-   * 
-   * @param frequency 
-   * @param station_name 
-   * @param env 
-   * @return true 
-   * @return false 
-   */
-  bool AR620xPutFreqStandby(double frequency, const TCHAR *station_name, OperationEnvironment &env);
-
-  /**
-   * @brief Creates the correct index for a given readable frequency
-   * 
-   * @param frequency 
-   * @return uint16_t 
-   */
   uint16_t ConvertFrequencyToAR62FrequencyId(double frequency);
 
-  /**
-   * @brief Creates a correct frequency-number given by the index
-   * 
-   * @param frequency_id 
-   * @return double 
-   */
   double ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id);
 
-  /**
-   * @brief This function sets the station name and frequency on the AR62xx
-   * 
-   * @param command 
-   * @param active_passive 
-   * @param frequency 
-   * @param station 
-   * @return int 
-   */
-  int SetAR620xStation(uint8_t *command, int active_passive, double frequency, const TCHAR *station);
+  int SetAR620xStation(uint8_t *command, int active_passive, RadioFrequency frequency, const TCHAR *station);
 
-  /**
-   * @brief Parses the messages which XCSoar receives from the radio.
-   * 
-   * @param string 
-   * @param len 
-   * @return true 
-   * @return false 
-   */
   bool AR620xParseString(const char *string, size_t len);
 
-  /**
-   * @brief 
-   * 
-   * @param sz_command 
-   * @param len 
-   * @param crc 
-   * @return int 
-   */
   int AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t crc);
 
 public:
-  /**
-   * @brief Sets the active frequency on the radio.
-   * 
-   * @param frequency 
-   * @param name 
-   * @param env 
-   * @return true 
-   * @return false 
-   */
   virtual bool PutActiveFrequency(RadioFrequency frequency,
                                   const TCHAR *name,
                                   OperationEnvironment &env) override;
-  /**
-   * @brief Sets the standby frequency on the radio.
-   * 
-   * @param frequency 
-   * @param name 
-   * @param env 
-   * @return true 
-   * @return false 
-   */
   virtual bool PutStandbyFrequency(RadioFrequency frequency,
                                    const TCHAR *name,
                                    OperationEnvironment &env) override;
 
-  /**
-   * @brief Receives and handles data from the radio.
-   *
-   * The function parses messages send by the radio.
-   * Because all control characters (e.g. HEADER_ID, PROTOKOLL_ID, STX, ACK, NAK, ...)
-   * can be part of the payload of the messages, it is important
-   * to separate the messages to distinguish control characters
-   * from payload characters.
-   *
-   * If a response to a command is received, the function notifies
-   * the sender. This could trigger a retransmission in case of a
-   * failure.
-   * 
-   * @param data 
-   * @param length 
-   * @param info 
-   * @return true 
-   * @return false 
-   */
   virtual bool DataReceived(const void *data, size_t length, struct NMEAInfo &info) override;
 };
 
@@ -252,64 +115,24 @@ AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
   response = ACK;
 }
 
-/**
- * @brief Receives and handles data from the radio.
- * 
- * The function parses messages send by the radio.
- * Because all control characters (e.g. HEADER_ID, PROTOKOLL_ID, STX, ACK, NAK, ...)
- * can be part of the payload of the messages, it is important
- * to separate the messages to distinguish control characters
- * from payload characters.
- *
- * If a response to a command is received, the function notifies
- * the sender. This could trigger a retransmission in case of a
- * failure.
- *
- * The initial frequency settings of the radio a delivered by this method and stored in the data struct "info"
- * every time connection is established
- * 
- * @param _data the data which is received
- * @param length length of the data
- * @param info nmea info
- * @return true returns true if data can be read
- * @return false returns false if data can't be read
- */
 bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInfo &info)
 {
 
   assert(_data != nullptr);                                        //!< check that data is not empty (null)
-  assert(length > 0);                                              //< the length of the data has to be greater than zero
+  assert(length > 0);                                              //!< the length of the data has to be greater than zero
   const uint8_t *data = (const uint8_t *)_data;                    //!< cast data to int
   bool data_is_ok = AR620xParseString((const char *)data, length); //!< if data can be parsed return true
   info.alive.Update(info.clock);                                   //!< send nmea info that we are receiving data
 
-  /*
-   * return
-   * true   => if data is ok
-   * false  => if data is not ok
-   */
   return data_is_ok;
 }
 
-/**
- * @brief Writes the message to the serial port on which the radio is connected
- * 
- * @param msg 
- * @param msg_size the site of the message
- * @param env operation environment
- * @return true if the message is sent
- * @return false if the message could not be sent
- */
 bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env)
 {
-  unsigned retries = MAX_RETRIES; //!< Number of tries to send a message will be decreased on every retry
-  assert(msg_size > 0);           //!< check that msg is not empty
+  unsigned retries = 3; //!< Number of tries to send a message will be decreased on every retry
+  assert(msg_size > 0); //!< check that msg is not empty
+  Mutex response_mutex; //!< Mutex to be locked to access response.
 
-  /*
-   * try to send a message as long as number of max-retries is not reached
-   * on every time the retries will be decreased until retries is zero
-   * if zero the loop will be stopped
-   */
   do
   {
     {
@@ -355,25 +178,6 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
   return false;
 }
 
-/**
- * @brief Converts a AR62xx-frequency-id to a correct radio-frequency-number
- * 
- * @param frequency_id the ar62xx-frequency-id
- * the frequency-id is a presentation of the frequency and channel with follwing structure
- * both (frequency and channel) combined are the radio-frequency which is shown on the radio
- * 
- * length: 4 Bytes (Unt16)
- *  X   X   X  |  X
- * ----------- | ---
- * frequency   | channel
- * 
- * frequency = <first possible frequency> + <frequency> * <frequency-range> / <raster>
- * channel 
- * 
- * e.g. Frequency on radio 122.205 => Frequency 122.2 Channel 05
- * 
- * @return double 
- */
 double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
 {
   double min_frequency = 118.000;                                                                         //!< the lowest frequency-number which can be set in AR62xx
@@ -439,20 +243,14 @@ double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
   return radio_frequency;
 }
 
-/**
- * @brief Creates the correct index for a given readable frequency
- * 
- * @param frequency 
- * @return uint16_t 
- */
 uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(double frequency)
 {
 
-  double min_frequency = 118.000;                                                                         //!< the lowest frequency-number which can be set in AR62xx
-  double max_frequency = 137.000;                                                                         //!< the highest frequency-number which can be set in AR62xx
-  double frequency_range = max_frequency - min_frequency;                                                 //!< the frequeny-range which can be set in the AR62xx
-  int frequency_bitmask = 0xFFF0;                                                                         //!< bitmask to get the frequency
-  double raster = 3040.0;                                                                                 //!< raster-length
+  double min_frequency = 118.000;                         //!< the lowest frequency-number which can be set in AR62xx
+  double max_frequency = 137.000;                         //!< the highest frequency-number which can be set in AR62xx
+  double frequency_range = max_frequency - min_frequency; //!< the frequeny-range which can be set in the AR62xx
+  int frequency_bitmask = 0xFFF0;                         //!< bitmask to get the frequency
+  double raster = 3040.0;                                 //!< raster-length
 
   uint16_t frequency_id = (((frequency)-min_frequency) * raster / frequency_range + 0.5);
   frequency_id &= frequency_bitmask;
@@ -516,13 +314,6 @@ uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(double frequency)
   return (frequency_id);
 }
 
-/**
- * @brief Creates the binary value for the message for the radio
- * 
- * @param data 
- * @param len 
- * @return uint16_t 
- */
 static uint16_t CRCBitwise(uint8_t *data, size_t len)
 {
   uint16_t crc = 0x0000;
@@ -542,21 +333,7 @@ static uint16_t CRCBitwise(uint8_t *data, size_t len)
   return (crc);
 }
 
-/**
- * @brief This function sets the station name and frequency on the AR62xx
- * 
- * The AR62xx always sends and receives both frequencies. the one which remains unchanged
- * is controlled by the "active_passive"-flag
- *
- * station is not used in the moment, AR62xx does not read it yet
- * 
- * @param command 
- * @param active_passive Active or passive station switch
- * @param frequency station frequency
- * @param station station Name string
- * @return int 
- */
-int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, double frequency, const TCHAR *station)
+int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFrequency frequency, const TCHAR *station)
 {
   unsigned int len = 0;
   assert(station != NULL);
@@ -567,22 +344,28 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, double 
   }
   //!< converting both actual frequencies
   IntConvertStruct ActiveFreqIdx;
+
   ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(active_frequency);
   IntConvertStruct PassiveFreqIdx;
   PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(passive_frequency);
   command[len++] = HEADER_ID;
-  command[len++] = PROTID;
+
+  //add prot-ID
+  command[len++] = 0x14;
+
   command[len++] = 5;
+
+  double freq = frequency.GetKiloHertz() / 1000.0;
 
   //!< converting the frequency which is to be changed
   switch (active_passive)
   {
   case ACTIVE_STATION:
-    ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(frequency);
+    ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(freq);
     break;
   default:
   case PASSIVE_STATION:
-    PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(frequency);
+    PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(freq);
     break;
   }
 
@@ -600,53 +383,6 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, double 
   return len;
 }
 
-/**
- * @brief Called by "PutActiveFrequency"
- * 
- * doing the real work
- * 
- * @param frequency 
- * @param station_name 
- * @param env 
- * @return true 
- * @return false 
- */
-bool AR62xxDevice::AR620xPutFreqActive(double frequency, const TCHAR *station_name, OperationEnvironment &env)
-{
-  int len;
-  uint8_t szTmp[MAX_CMD_LEN];
-  len = SetAR620xStation(szTmp, ACTIVE_STATION, frequency, station_name);
-  bool isSend = Send((uint8_t *)&szTmp, len, env);
-  return isSend;
-}
-
-/**
- * @brief Called by "PutStandbyFrequency"
- * Called by "PutStandbyFrequency"
- * doing the real work
- * @param frequency 
- * @param station_name 
- * @param env 
- * @return true 
- * @return false 
- */
-bool AR62xxDevice::AR620xPutFreqStandby(double frequency, const TCHAR *station_name, OperationEnvironment &env)
-{
-  int len;
-  uint8_t szTmp[MAX_CMD_LEN] = {};
-  len = SetAR620xStation(szTmp, PASSIVE_STATION, frequency, station_name);
-  bool isSend = Send((uint8_t *)&szTmp, len, env);
-  return isSend;
-}
-
-/**
- * @brief Parses the messages which XCSoar receives from the radio.
- * 
- * @param string 
- * @param len 
- * @return true 
- * @return false 
- */
 bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
 {
   size_t cnt = 0;
@@ -702,14 +438,6 @@ bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
   return parameter_changed;
 }
 
-/**
- * @brief this function converts a KRT answer sting to a NMEA answer
- * 
- * @param sz_command AR620x binary code to be converted, representing the state of a function
- * @param len length of the AR620x binary code to be converted
- * @param crc 
- * @return int 
- */
 int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t crc)
 {
   if (sz_command == NULL)
@@ -757,57 +485,34 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
   return processed;
 }
 
-/**
- * @brief Sets the active frequency on the radio.
- * 
- * @param frequency 
- * @param name 
- * @param env 
- * @return true 
- * @return false 
- */
 bool AR62xxDevice::PutActiveFrequency(RadioFrequency frequency,
                                       const TCHAR *name,
                                       OperationEnvironment &env)
 {
-  unsigned int ufreq = frequency.GetKiloHertz();
-  double freq = ufreq / 1000.0;
-  return AR620xPutFreqActive(freq, (const TCHAR *)name, env);
+  int len;
+  uint8_t szTmp[MAX_CMD_LEN];
+  len = SetAR620xStation(szTmp, ACTIVE_STATION, frequency, (const TCHAR *)name);
+  bool isSend = Send((uint8_t *)&szTmp, len, env);
+  return isSend;
 }
 
-/**
- * @brief Sets the standby (passive) frequency on the radio.
- * 
- * @param frequency 
- * @param name 
- * @param env 
- * @return true 
- * @return false 
- */
+
 bool AR62xxDevice::PutStandbyFrequency(RadioFrequency frequency,
                                        const TCHAR *name,
                                        OperationEnvironment &env)
 {
-  unsigned int ufreq = frequency.GetKiloHertz();
-  double freq = ufreq / 1000.0;
-  return AR620xPutFreqStandby(freq, (const TCHAR *)name, env);
+  int len;
+  uint8_t szTmp[MAX_CMD_LEN] = {};
+  len = SetAR620xStation(szTmp, PASSIVE_STATION, frequency, (const TCHAR *)name);
+  bool isSend = Send((uint8_t *)&szTmp, len, env);
+  return isSend;
 }
 
-/**
- * @brief Assign the selected port on Object construction
- * 
- * @param config 
- * @param comPort 
- * @return Device* 
- */
 static Device *AR62xxCreateOnPort(const DeviceConfig &config, Port &comPort)
 {
   return new AR62xxDevice(comPort);
 }
 
-/**
- * @brief Driver registration in XCSoar, connect to a serial port
- */
 const struct DeviceRegister ar62xx_driver = {
     _T("AR62xx"),
     _T("AR62xx"),
