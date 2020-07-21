@@ -26,10 +26,6 @@ Copyright_License {
  * IMPLEMENTED > setting the active frequency
  * IMPLEMENTED > setting the passive frequency
  *
- * TODO setting/reading dual scan on/off
- * TODO reading frequency change on the radio
- * TODO setting/reading squelsh settings
- *
  */
 
 #include "Device/Driver/AR62xx.hpp"
@@ -51,13 +47,12 @@ Copyright_License {
 //!< constants, expressions, defines for AR62xx radios binary protocol
 constexpr uint8_t HEADER_ID = 0xA5;
 #define PROTID 0x14;
-#define QUERY BIT(7)
-#define DUAL BIT(8)
-#define SQUELCH BIT(7)
+#define QUERY 1 << 7
+#define DUAL 1 << 8
+#define SQUELCH 1 << 7
 #define MAX_CMD_LEN 128
 #define ACTIVE_STATION 1
 #define PASSIVE_STATION 0
-#define BIT(n) (1 << (n))
 #define NAME_SIZE 30
 
 
@@ -72,12 +67,8 @@ typedef struct
   double passive_frequency;              //!< passive (or standby) station frequency
   TCHAR passive_station_name[NAME_SIZE]; //!< passive (or standby) station name
   TCHAR active_station_name[NAME_SIZE];  //!< active station name
-  int radio_volume;                      //!< Radio Volume
-  int radio_squelch;                     //!< Radio Squelch
-  int intercom_volume;                   //!< Radio Intercom Volume
   bool parameter_changed;                //!< Parameter Changed Flag TRUE = parameter changed)
   bool radio_enabled;                    //!< Radio Installed d Flag (TRUE = Radio found)
-  bool dual_channel_active;              //!< Dual Channel mode active flag (TRUE = on)
   bool enabled_8_33;                     //!< 8,33kHz Radio enabled (TRUE = 8,33kHz)
   bool rx;                               //!< Radio reception active (TRUE = reception)
   bool tx;                               //!< Radio transmission active (TRUE = transmission)
@@ -87,11 +78,6 @@ typedef struct
   bool tx_timeout;                       //!< Timeout while transmission (2Min)
 } Radio;
 
-IntConvertStruct crc;
-IntConvertStruct frequency;
-IntConvertStruct status;
-
-volatile bool is_sending = false;
 
 /**
  * @brief AR62xx device class.
@@ -115,7 +101,7 @@ public:
    * 
    * @param _port Port the radio is connected to.
    */
-  AR62xxDevice(Port &_port);
+  explicit AR62xxDevice(Port &_port);
 
 private:
   Port &port;                             //!< Port the radio is connected to.
@@ -125,6 +111,13 @@ private:
   Cond rx_cond;                           //!< Condition to signal that a response was received from the radio.
   Mutex response_mutex;                   //!< Mutex to be locked to access response.
   Radio radio;                            //!< radio variable
+
+  IntConvertStruct crc;
+  IntConvertStruct frequency;
+  IntConvertStruct status;
+
+  bool is_sending = false;
+
 
   /**
    * @brief Sends a message to the radio.
@@ -727,7 +720,7 @@ bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
 /**
  * @brief this function converts a KRT answer sting to a NMEA answer
  * 
- * @param sz_command AR620x binary code to be converted, representing the state of a function (dual scan, squelsh, act. freq., pass. freq., ...)
+ * @param sz_command AR620x binary code to be converted, representing the state of a function
  * @param len length of the AR620x binary code to be converted
  * @param crc 
  * @return int 
@@ -740,17 +733,8 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     return 0;
 
   static uint16_t uiLastChannelCRC = 0;
-  static uint16_t uiVolumeCRC = 0;
   static uint16_t uiVersionCRC = 0;
-  static uint16_t uiStatusCRC = 0;
-  static uint16_t uiSquelchCRC = 0;
-  static uint16_t uiRxStatusCRC = 0;
 
-#ifdef RADIO_VOLTAGE
-  static uint16_t uiVoltageCRC = 0;
-#endif
-
-  uint32_t ulState;
   int processed = 0;
 
   assert(sz_command != NULL);
@@ -763,53 +747,6 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
       uiVersionCRC = crc;
     }
     break;
-
-  //!< Volume settings
-  case 3:
-    if (uiVolumeCRC != crc)
-    {
-      uiVolumeCRC = crc;
-      radio.parameter_changed = true;
-      radio.radio_volume = (50 - (int)sz_command[4]) / 5;
-    }
-    break;
-
-  //!< Squelsh settings
-  case 4:
-    if (uiSquelchCRC != crc)
-    {
-      uiSquelchCRC = crc;
-      radio.parameter_changed = true;
-      radio.radio_squelch = (int)(sz_command[4] - 6) / 2 + 1; // 6 + (Squelch-1)*2
-    }
-    break;
-
-  //!< Dual scan settings
-  case 12:
-    if (uiStatusCRC != crc)
-    {
-      uiStatusCRC = crc;
-      radio.parameter_changed = true;
-      status.intVal8[1] = sz_command[4];
-      status.intVal8[0] = sz_command[5];
-      if (status.intVal16 & DUAL)
-        radio.dual_channel_active = true;
-      else
-        radio.dual_channel_active = false;
-    }
-    break;
-#ifdef RADIO_VOLTAGE
-
-  //!< actual current of the radio
-  case 21:
-    if (uiVoltageCRC != crc)
-    {
-      uiVoltageCRC = crc;
-      GPS_INFO.ExtBatt2_Voltage = 8.5 + sz_command[4] * 0.1;
-      RadioPara.Changed = true;
-    }
-    break;
-#endif
 
   //!< Frequency settings, always for both frequencies (active and passive)
   case 22:
@@ -824,20 +761,6 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
       frequency.intVal8[1] = sz_command[6];
       frequency.intVal8[0] = sz_command[7];
       radio.passive_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
-      radio.parameter_changed = true;
-    }
-    break;
-
-  //!< general state information
-  case 64:
-    if (uiRxStatusCRC != crc)
-    {
-      uiRxStatusCRC = crc;
-      ulState = sz_command[4] << 24 | sz_command[5] << 16 | sz_command[6] << 8 | sz_command[7];
-      radio.tx = ((ulState & (BIT(5) | BIT(6))) > 0) ? true : false;
-      radio.rx_active = ((ulState & BIT(7)) > 0) ? true : false;
-      radio.rx_passive = ((ulState & BIT(8)) > 0) ? true : false;
-      radio.rx = (radio.rx_active || radio.rx_passive);
       radio.parameter_changed = true;
     }
     break;
