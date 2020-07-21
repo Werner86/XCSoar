@@ -61,23 +61,6 @@ typedef union {
   uint8_t intVal8[2];
 } IntConvertStruct;
 
-typedef struct
-{
-  double active_frequency;               //!< active station frequency
-  double passive_frequency;              //!< passive (or standby) station frequency
-  TCHAR passive_station_name[NAME_SIZE]; //!< passive (or standby) station name
-  TCHAR active_station_name[NAME_SIZE];  //!< active station name
-  bool parameter_changed;                //!< Parameter Changed Flag TRUE = parameter changed)
-  bool radio_enabled;                    //!< Radio Installed d Flag (TRUE = Radio found)
-  bool enabled_8_33;                     //!< 8,33kHz Radio enabled (TRUE = 8,33kHz)
-  bool rx;                               //!< Radio reception active (TRUE = reception)
-  bool tx;                               //!< Radio transmission active (TRUE = transmission)
-  bool rx_active;                        //!< Radio reception on active station (TRUE = reception)
-  bool rx_passive;                       //!< Radio reception on passive (standby) station
-  bool low_bat;                          //!< Battery low flag (TRUE = Batt low)
-  bool tx_timeout;                       //!< Timeout while transmission (2Min)
-} Radio;
-
 
 /**
  * @brief AR62xx device class.
@@ -110,11 +93,14 @@ private:
   uint8_t response;                       //!< Last response received from the radio.
   Cond rx_cond;                           //!< Condition to signal that a response was received from the radio.
   Mutex response_mutex;                   //!< Mutex to be locked to access response.
-  Radio radio;                            //!< radio variable
 
   IntConvertStruct crc;
   IntConvertStruct frequency;
   IntConvertStruct status;
+
+  double active_frequency;               //!< active station frequency
+  double passive_frequency;              //!< passive (or standby) station frequency
+  bool parameter_changed;                //!< Parameter Changed Flag TRUE = parameter changed)
 
   bool is_sending = false;
 
@@ -264,7 +250,6 @@ constexpr std::chrono::milliseconds AR62xxDevice::CMD_TIMEOUT;
 AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
 {
   response = ACK;
-  radio.enabled_8_33 = true;
 }
 
 /**
@@ -582,9 +567,9 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, double 
   }
   //!< converting both actual frequencies
   IntConvertStruct ActiveFreqIdx;
-  ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(radio.active_frequency);
+  ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(active_frequency);
   IntConvertStruct PassiveFreqIdx;
-  PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(radio.passive_frequency);
+  PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(passive_frequency);
   command[len++] = HEADER_ID;
   command[len++] = PROTID;
   command[len++] = 5;
@@ -714,7 +699,7 @@ bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
       }
     }
   }
-  return radio.parameter_changed;
+  return parameter_changed;
 }
 
 /**
@@ -753,15 +738,15 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     if (uiLastChannelCRC != crc)
     {
       uiLastChannelCRC = crc;
-      radio.parameter_changed = true;
+      parameter_changed = true;
       frequency.intVal8[1] = sz_command[4];
       frequency.intVal8[0] = sz_command[5];
-      radio.active_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
+      active_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
 
       frequency.intVal8[1] = sz_command[6];
       frequency.intVal8[0] = sz_command[7];
-      radio.passive_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
-      radio.parameter_changed = true;
+      passive_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
+      parameter_changed = true;
     }
     break;
   default:
