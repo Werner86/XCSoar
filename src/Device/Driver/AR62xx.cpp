@@ -49,7 +49,6 @@ typedef union {
 
 class AR62xxDevice final : public AbstractDevice
 {
-  static constexpr auto CMD_TIMEOUT = std::chrono::milliseconds(250); //!< command timeout
   static constexpr char STX = 0x02;                                   //!< command start character.
   static constexpr char ACK = 0x06;                                   //!< command acknowledged character.
   static constexpr char NAK = 0x15;                                   //!< command not acknowledged character.
@@ -60,7 +59,6 @@ public:
 
 private:
   Port &port;       //!< Port the radio is connected to.
-  uint8_t response; //!< Last response received from the radio.
   Cond rx_cond;     //!< Condition to signal that a response was received from the radio.
 
   IntConvertStruct crc;
@@ -94,23 +92,12 @@ public:
   virtual bool DataReceived(const void *data, size_t length, struct NMEAInfo &info) override;
 };
 
-/**
- * @brief Compiler Workaround
- * Workaround for some GCC versions which don't inline the constexpr
- * despite being defined so in C++17, see
- * http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0386r2.pdf
- */
-#if GCC_OLDER_THAN(9, 0)
-constexpr std::chrono::milliseconds AR62xxDevice::CMD_TIMEOUT;
-#endif
-
 /*
  * Constructor
  * Port on which the radio is connected
  */
 AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
 {
-  response = ACK;
 }
 
 bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInfo &info)
@@ -128,6 +115,7 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
   unsigned retries = 3; //!< Number of tries to send a message will be decreased on every retry
   assert(msg_size > 0); //!< check that msg is not empty
   Mutex response_mutex; //!< Mutex to be locked to access response.
+  uint8_t response = ACK; //!< Last response received from the radio.
 
   do
   {
@@ -139,7 +127,7 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
     is_sending = true; //!< set sending-flat
 
     //!< message NOT sent
-    if (!port.FullWrite(msg, msg_size, env, CMD_TIMEOUT))
+    if (!port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250)))
     {
       response = NAK; //!< if message could not be sent set response to "command not acknowledged character"
     }
@@ -154,7 +142,7 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
     uint8_t _response;
     {
       std::unique_lock<Mutex> lock(response_mutex);
-      rx_cond.wait_for(lock, std::chrono::milliseconds(CMD_TIMEOUT)); //!< wait for the response
+      rx_cond.wait_for(lock, std::chrono::milliseconds(250)); //!< wait for the response
       _response = response;
     }
     is_sending = false; //!< reset flag is_sending
@@ -184,20 +172,23 @@ RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequenc
   int raster = 3040;
   */
 
+  double min_frequency = 118.000;                         //!< the lowest frequency-number which can be set in AR62xx
+  double max_frequency = 137.000;                         //!< the highest frequency-number which can be set in AR62xx
+  double frequency_range = max_frequency - min_frequency; //!< the frequeny-range which can be set in the AR62xx
+  int frequency_bitmask = 0xFFF0;                         //!< bitmask to get the frequency
+  int channel_bitmask = 0xF;                              //!< bitmask to get the chanel
+  double raster = 3040.0;                                 //!< raster-length
 
-  double min_frequency = 118.000;                                                                         //!< the lowest frequency-number which can be set in AR62xx
-  double max_frequency = 137.000;                                                                         //!< the highest frequency-number which can be set in AR62xx
-  double frequency_range = max_frequency - min_frequency;                                                 //!< the frequeny-range which can be set in the AR62xx
-  int frequency_bitmask = 0xFFF0;                                                                         //!< bitmask to get the frequency
-  int channel_bitmask = 0xF;                                                                              //!< bitmask to get the chanel
-  double raster = 3040.0;                                                                                 //!< raster-length
   double radio_frequency = min_frequency + (frequency_id & frequency_bitmask) * frequency_range / raster; //!< calculate frequency
 
   //!< get the channel out of the frequence_id
   uint16_t channel = frequency_id & channel_bitmask;
+
+  //TODO remove when testing non double
   radio_frequency *= 1000.0;
 
-  
+
+  //TODO should be put in a formula or sth. else
   switch (channel)
   {
   case 0:
@@ -257,14 +248,14 @@ RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequenc
 
 uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(RadioFrequency freq)
 {
-  int frequency_bitmask = 0xFFF0;                         //!< bitmask to get the frequency
+  int frequency_bitmask = 0xFFF0; //!< bitmask to get the frequency
 
   double frequency = freq.GetKiloHertz() / 1000.0;
   double min_frequency = 118.000;                         //!< the lowest frequency-number which can be set in AR62xx
   double max_frequency = 137.000;                         //!< the highest frequency-number which can be set in AR62xx
   double frequency_range = max_frequency - min_frequency; //!< the frequeny-range which can be set in the AR62xx
   double raster = 3040.0;                                 //!< raster-length
-  uint16_t frequency_id = (frequency-min_frequency) * raster / frequency_range + 0.5;
+  uint16_t frequency_id = (frequency - min_frequency) * raster / frequency_range + 0.5;
 
   /*
   //TODO test to remove double
@@ -275,7 +266,7 @@ uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(RadioFrequency freq)
   uint16_t frequency_id = (freq.GetKiloHertz()-min_frequency) * raster / frequency_range + 0.5;
   */
 
- frequency_id &= frequency_bitmask;
+  frequency_id &= frequency_bitmask;
 
   //get channel
   uint8_t channel = ((int)(frequency * 1000.0 + 0.5)) - (((int)(frequency * 10.0)) * 100);
