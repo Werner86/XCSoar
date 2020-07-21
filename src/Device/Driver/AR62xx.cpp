@@ -65,7 +65,6 @@ private:
 
   IntConvertStruct crc;
   IntConvertStruct frequency;
-  IntConvertStruct status;
 
   double active_frequency;  //!< active station frequency
   double passive_frequency; //!< passive (or standby) station frequency
@@ -81,9 +80,9 @@ private:
 
   int SetAR620xStation(uint8_t *command, int active_passive, RadioFrequency frequency, const TCHAR *station);
 
-  bool AR620xParseString(const char *string, size_t len);
+  void AR620xParseString(const char *string, size_t len);
 
-  int AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t crc);
+  int AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc);
 
 public:
   virtual bool PutActiveFrequency(RadioFrequency frequency,
@@ -117,14 +116,12 @@ AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
 
 bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInfo &info)
 {
-
-  assert(_data != nullptr);                                        //!< check that data is not empty (null)
-  assert(length > 0);                                              //!< the length of the data has to be greater than zero
-  const uint8_t *data = (const uint8_t *)_data;                    //!< cast data to int
-  bool data_is_ok = AR620xParseString((const char *)data, length); //!< if data can be parsed return true
-  info.alive.Update(info.clock);                                   //!< send nmea info that we are receiving data
-
-  return data_is_ok;
+  assert(_data != nullptr);
+  assert(length > 0);
+  const uint8_t *data = (const uint8_t *)_data;
+  AR620xParseString((const char *)data, length);
+  info.alive.Update(info.clock);
+  return true;
 }
 
 bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env)
@@ -335,7 +332,7 @@ static uint16_t CRCBitwise(uint8_t *data, size_t len)
 
 int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFrequency frequency, const TCHAR *station)
 {
-  unsigned int len = 0;
+  unsigned int command_length = 0;
   assert(station != NULL);
   assert(command != NULL);
   if (command == NULL)
@@ -348,12 +345,12 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFr
   ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(active_frequency);
   IntConvertStruct PassiveFreqIdx;
   PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(passive_frequency);
-  command[len++] = HEADER_ID;
+  command[command_length++] = HEADER_ID;
 
   //add prot-ID
-  command[len++] = 0x14;
+  command[command_length++] = 0x14;
 
-  command[len++] = 5;
+  command[command_length++] = 5;
 
   double freq = frequency.GetKiloHertz() / 1000.0;
 
@@ -370,20 +367,20 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFr
   }
 
   //!< setting frequencies -command byte in the protocol of the radio
-  command[len++] = 22;
-  command[len++] = ActiveFreqIdx.intVal8[1];
-  command[len++] = ActiveFreqIdx.intVal8[0];
-  command[len++] = PassiveFreqIdx.intVal8[1];
-  command[len++] = PassiveFreqIdx.intVal8[0];
+  command[command_length++] = 22;
+  command[command_length++] = ActiveFreqIdx.intVal8[1];
+  command[command_length++] = ActiveFreqIdx.intVal8[0];
+  command[command_length++] = PassiveFreqIdx.intVal8[1];
+  command[command_length++] = PassiveFreqIdx.intVal8[0];
 
   //!< Creating the binary value
-  crc.intVal16 = CRCBitwise(command, len);
-  command[len++] = crc.intVal8[1];
-  command[len++] = crc.intVal8[0];
-  return len;
+  crc.intVal16 = CRCBitwise(command, command_length);
+  command[command_length++] = crc.intVal8[1];
+  command[command_length++] = crc.intVal8[0];
+  return command_length;
 }
 
-bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
+void AR62xxDevice::AR620xParseString(const char *string, size_t len)
 {
   size_t cnt = 0;
   uint16_t CalCRC = 0;
@@ -392,10 +389,8 @@ bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
 #define REC_BUFSIZE 127
   static uint8_t command[REC_BUFSIZE];
 
-  if (string == NULL)
-    return 0;
-  if (len == 0)
-    return 0;
+  if (string == NULL || len == 0)
+    return;
 
   while (cnt < len)
   {
@@ -435,12 +430,11 @@ bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
       }
     }
   }
-  return parameter_changed;
 }
 
-int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t crc)
+int AR62xxDevice::AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc)
 {
-  if (sz_command == NULL)
+  if (command == NULL)
     return 0;
   if (len == 0)
     return 0;
@@ -450,9 +444,9 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
 
   int processed = 0;
 
-  assert(sz_command != NULL);
+  assert(command != NULL);
 
-  switch ((unsigned char)(sz_command[3] & 0x7F))
+  switch ((unsigned char)(command[3] & 0x7F))
   {
   case 0:
     if (uiVersionCRC != crc)
@@ -466,15 +460,13 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
     if (uiLastChannelCRC != crc)
     {
       uiLastChannelCRC = crc;
-      parameter_changed = true;
-      frequency.intVal8[1] = sz_command[4];
-      frequency.intVal8[0] = sz_command[5];
+      frequency.intVal8[1] = command[4];
+      frequency.intVal8[0] = command[5];
       active_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
 
-      frequency.intVal8[1] = sz_command[6];
-      frequency.intVal8[0] = sz_command[7];
+      frequency.intVal8[1] = command[6];
+      frequency.intVal8[0] = command[7];
       passive_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
-      parameter_changed = true;
     }
     break;
   default:
@@ -495,7 +487,6 @@ bool AR62xxDevice::PutActiveFrequency(RadioFrequency frequency,
   bool isSend = Send((uint8_t *)&szTmp, len, env);
   return isSend;
 }
-
 
 bool AR62xxDevice::PutStandbyFrequency(RadioFrequency frequency,
                                        const TCHAR *name,
