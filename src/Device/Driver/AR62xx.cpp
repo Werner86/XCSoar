@@ -66,23 +66,22 @@ private:
   IntConvertStruct crc;
   IntConvertStruct frequency;
 
-  double active_frequency;  //!< active station frequency
-  double passive_frequency; //!< passive (or standby) station frequency
-  bool parameter_changed;   //!< Parameter Changed Flag TRUE = parameter changed)
+  RadioFrequency active_frequency;  //!< active station frequency
+  RadioFrequency passive_frequency; //!< passive (or standby) station frequency
 
   bool is_sending = false;
 
   bool Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env);
 
-  uint16_t ConvertFrequencyToAR62FrequencyId(double frequency);
+  uint16_t ConvertFrequencyToAR62FrequencyId(RadioFrequency frequency);
 
-  double ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id);
+  RadioFrequency ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id);
 
   int SetAR620xStation(uint8_t *command, int active_passive, RadioFrequency frequency, const TCHAR *station);
 
   void AR620xParseString(const char *string, size_t len);
 
-  int AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc);
+  void AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc);
 
 public:
   virtual bool PutActiveFrequency(RadioFrequency frequency,
@@ -175,7 +174,7 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
   return false;
 }
 
-double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
+RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
 {
   double min_frequency = 118.000;                                                                         //!< the lowest frequency-number which can be set in AR62xx
   double max_frequency = 137.000;                                                                         //!< the highest frequency-number which can be set in AR62xx
@@ -237,12 +236,15 @@ double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
     radio_frequency += 0.090;
     break;
   }
-  return radio_frequency;
+
+  RadioFrequency result;
+  result.SetKiloHertz(radio_frequency * 1000.0);
+  return result;
 }
 
-uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(double frequency)
+uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(RadioFrequency freq)
 {
-
+  double frequency = freq.GetKiloHertz() / 1000.0;
   double min_frequency = 118.000;                         //!< the lowest frequency-number which can be set in AR62xx
   double max_frequency = 137.000;                         //!< the highest frequency-number which can be set in AR62xx
   double frequency_range = max_frequency - min_frequency; //!< the frequeny-range which can be set in the AR62xx
@@ -335,10 +337,10 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFr
   unsigned int command_length = 0;
   assert(station != NULL);
   assert(command != NULL);
+
   if (command == NULL)
-  {
     return false;
-  }
+
   //!< converting both actual frequencies
   IntConvertStruct ActiveFreqIdx;
 
@@ -352,17 +354,15 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFr
 
   command[command_length++] = 5;
 
-  double freq = frequency.GetKiloHertz() / 1000.0;
-
   //!< converting the frequency which is to be changed
   switch (active_passive)
   {
   case ACTIVE_STATION:
-    ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(freq);
+    ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(frequency);
     break;
   default:
   case PASSIVE_STATION:
-    PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(freq);
+    PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(frequency);
     break;
   }
 
@@ -432,22 +432,20 @@ void AR62xxDevice::AR620xParseString(const char *string, size_t len)
   }
 }
 
-int AR62xxDevice::AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc)
+void AR62xxDevice::AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc)
 {
   if (command == NULL)
-    return 0;
+    return;
   if (len == 0)
-    return 0;
+    return;
 
   static uint16_t uiLastChannelCRC = 0;
   static uint16_t uiVersionCRC = 0;
 
-  int processed = 0;
-
-  assert(command != NULL);
-
   switch ((unsigned char)(command[3] & 0x7F))
   {
+
+  //TODO check if needed!
   case 0:
     if (uiVersionCRC != crc)
     {
@@ -472,31 +470,24 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc)
   default:
     break;
   }
-
-  //!< return the number of converted characters
-  return processed;
 }
 
 bool AR62xxDevice::PutActiveFrequency(RadioFrequency frequency,
                                       const TCHAR *name,
                                       OperationEnvironment &env)
 {
-  int len;
   uint8_t szTmp[MAX_CMD_LEN];
-  len = SetAR620xStation(szTmp, ACTIVE_STATION, frequency, (const TCHAR *)name);
-  bool isSend = Send((uint8_t *)&szTmp, len, env);
-  return isSend;
+  int len = SetAR620xStation(szTmp, ACTIVE_STATION, frequency, (const TCHAR *)name);
+  return Send((uint8_t *)&szTmp, len, env);
 }
 
 bool AR62xxDevice::PutStandbyFrequency(RadioFrequency frequency,
                                        const TCHAR *name,
                                        OperationEnvironment &env)
 {
-  int len;
   uint8_t szTmp[MAX_CMD_LEN] = {};
-  len = SetAR620xStation(szTmp, PASSIVE_STATION, frequency, (const TCHAR *)name);
-  bool isSend = Send((uint8_t *)&szTmp, len, env);
-  return isSend;
+  int len = SetAR620xStation(szTmp, PASSIVE_STATION, frequency, (const TCHAR *)name);
+  return Send((uint8_t *)&szTmp, len, env);
 }
 
 static Device *AR62xxCreateOnPort(const DeviceConfig &config, Port &comPort)
