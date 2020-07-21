@@ -37,7 +37,6 @@ Copyright_License {
 
 #include <stdio.h>
 
-constexpr uint8_t HEADER_ID = 0xA5;
 #define MAX_CMD_LEN 128
 #define ACTIVE_STATION 1
 #define PASSIVE_STATION 0
@@ -61,8 +60,6 @@ private:
   bool Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env);
 
   uint16_t ConvertFrequencyToAR62FrequencyId(RadioFrequency frequency);
-
-  RadioFrequency ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id);
 
   int SetAR620xStation(uint8_t *command, int active_passive, RadioFrequency frequency, const TCHAR *station);
 
@@ -91,77 +88,7 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
   return port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250));
 }
 
-RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
-{
-  int min_frequency = 118000;
-  int max_frequency = 137000;
-  int frequency_range = max_frequency - min_frequency;
-  int raster = 3040;
-  
-  int frequency_bitmask = 0xFFF0;                         //!< bitmask to get the frequency
-  int channel_bitmask = 0xF;                              //!< bitmask to get the chanel
 
-  int radio_frequency = min_frequency + (frequency_id & frequency_bitmask) * frequency_range / raster * 1000;
-
-  //!< get the channel out of the frequence_id
-  uint16_t channel = frequency_id & channel_bitmask;
-
-  switch (channel)
-  {
-  case 0:
-    radio_frequency += 0;
-    break;
-  case 1:
-    radio_frequency += 5;
-    break;
-  case 2:
-    radio_frequency += 10;
-    break;
-  case 3:
-    radio_frequency += 15;
-    break;
-  case 4:
-    radio_frequency += 25;
-    break;
-  case 5:
-    radio_frequency += 30;
-    break;
-  case 6:
-    radio_frequency += 35;
-    break;
-  case 7:
-    radio_frequency += 40;
-    break;
-  case 8:
-    radio_frequency += 50;
-    break;
-  case 9:
-    radio_frequency += 55;
-    break;
-  case 10:
-    radio_frequency += 60;
-    break;
-  case 11:
-    radio_frequency += 65;
-    break;
-  case 12:
-    radio_frequency += 75;
-    break;
-  case 13:
-    radio_frequency += 80;
-    break;
-  case 14:
-    radio_frequency += 85;
-    break;
-  case 15:
-    radio_frequency += 90;
-    break;
-  }
-
-  RadioFrequency result;
-  result.SetKiloHertz(radio_frequency);
-  return result;
-}
 
 uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(RadioFrequency freq)
 {
@@ -271,7 +198,9 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFr
   ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(active_frequency);
   IntConvertStruct PassiveFreqIdx;
   PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(passive_frequency);
-  command[command_length++] = HEADER_ID;
+
+  //add header-id
+  command[command_length++] = 0xA5;
 
   //add prot-ID
   command[command_length++] = 0x14;
