@@ -49,25 +49,14 @@ typedef union {
 
 class AR62xxDevice final : public AbstractDevice
 {
-  static constexpr char STX = 0x02; //!< command start character.
-  static constexpr char ACK = 0x06; //!< command acknowledged character.
-  static constexpr char NAK = 0x15; //!< command not acknowledged character.
-  static constexpr char NO_RSP = 0; //!< No response received yet.
 
 public:
   explicit AR62xxDevice(Port &_port);
 
 private:
   Port &port;   //!< Port the radio is connected to.
-  Cond rx_cond; //!< Condition to signal that a response was received from the radio.
-
-  IntConvertStruct crc;
-  IntConvertStruct frequency;
-
   RadioFrequency active_frequency;  //!< active station frequency
   RadioFrequency passive_frequency; //!< passive (or standby) station frequency
-
-  bool is_sending = false;
 
   bool Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env);
 
@@ -88,10 +77,6 @@ public:
   virtual bool DataReceived(const void *data, size_t length, struct NMEAInfo &info) override;
 };
 
-/*
- * Constructor
- * Port on which the radio is connected
- */
 AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
 {
 }
@@ -103,59 +88,11 @@ bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInf
 
 bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env)
 {
-  unsigned retries = 3;   //!< Number of tries to send a message will be decreased on every retry
-  assert(msg_size > 0);   //!< check that msg is not empty
-  Mutex response_mutex;   //!< Mutex to be locked to access response.
-  uint8_t response = ACK; //!< Last response received from the radio.
-
-  do
-  {
-    {
-      const std::lock_guard<Mutex> lock(response_mutex);
-      response = NO_RSP; //!< initialize response with "No response received yet"
-    }
-
-    is_sending = true; //!< set sending-flat
-
-    //!< message NOT sent
-    if (!port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250)))
-    {
-      response = NAK; //!< if message could not be sent set response to "command not acknowledged character"
-    }
-
-    //!< message sent
-    else
-    {
-      response = ACK; //!< if message could be sent set response to "command acknowledged character"
-    }
-
-    //!< Wait for the response
-    uint8_t _response;
-    {
-      std::unique_lock<Mutex> lock(response_mutex);
-      rx_cond.wait_for(lock, std::chrono::milliseconds(250)); //!< wait for the response
-      _response = response;
-    }
-    is_sending = false; //!< reset flag is_sending
-
-    //!< ACK received
-    if (_response == ACK)
-    {
-      // ACK received, finish, all went well
-      return true;
-    }
-
-    //!< No ACK received, retry, possibly an error occurred
-    retries--;
-  } while (retries);
-
-  //!< returns false if message could not be sent
-  return false;
+  return port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250));
 }
 
 RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
 {
-
   int min_frequency = 118000;
   int max_frequency = 137000;
   int frequency_range = max_frequency - min_frequency;
@@ -361,6 +298,7 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFr
   command[command_length++] = PassiveFreqIdx.intVal8[0];
 
   //!< Creating the binary value
+  IntConvertStruct crc;
   crc.intVal16 = CRCBitwise(command, command_length);
   command[command_length++] = crc.intVal8[1];
   command[command_length++] = crc.intVal8[0];
