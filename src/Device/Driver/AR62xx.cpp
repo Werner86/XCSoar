@@ -155,30 +155,20 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
 
 RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
 {
-  /*
-  //TODO test to replace double
+
   int min_frequency = 118000;
   int max_frequency = 137000;
   int frequency_range = max_frequency - min_frequency;
   int raster = 3040;
-  */
-
-  double min_frequency = 118.000;                         //!< the lowest frequency-number which can be set in AR62xx
-  double max_frequency = 137.000;                         //!< the highest frequency-number which can be set in AR62xx
-  double frequency_range = max_frequency - min_frequency; //!< the frequeny-range which can be set in the AR62xx
+  
   int frequency_bitmask = 0xFFF0;                         //!< bitmask to get the frequency
   int channel_bitmask = 0xF;                              //!< bitmask to get the chanel
-  double raster = 3040.0;                                 //!< raster-length
 
-  double radio_frequency = min_frequency + (frequency_id & frequency_bitmask) * frequency_range / raster; //!< calculate frequency
+  int radio_frequency = min_frequency + (frequency_id & frequency_bitmask) * frequency_range / raster * 1000;
 
   //!< get the channel out of the frequence_id
   uint16_t channel = frequency_id & channel_bitmask;
 
-  //TODO remove when testing non double
-  radio_frequency *= 1000.0;
-
-  //TODO should be put in a formula or sth. else
   switch (channel)
   {
   case 0:
