@@ -176,6 +176,15 @@ bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironm
 
 RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
 {
+  /*
+  //TODO test to replace double
+  int min_frequency = 118000;
+  int max_frequency = 137000;
+  int frequency_range = max_frequency - min_frequency;
+  int raster = 3040;
+  */
+
+
   double min_frequency = 118.000;                                                                         //!< the lowest frequency-number which can be set in AR62xx
   double max_frequency = 137.000;                                                                         //!< the highest frequency-number which can be set in AR62xx
   double frequency_range = max_frequency - min_frequency;                                                 //!< the frequeny-range which can be set in the AR62xx
@@ -185,75 +194,95 @@ RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequenc
   double radio_frequency = min_frequency + (frequency_id & frequency_bitmask) * frequency_range / raster; //!< calculate frequency
 
   //!< get the channel out of the frequence_id
-  switch (frequency_id & channel_bitmask)
+  uint16_t channel = frequency_id & channel_bitmask;
+  radio_frequency *= 1000.0;
+
+  
+  switch (channel)
   {
   case 0:
-    radio_frequency += 0.000;
+    radio_frequency += 0;
     break;
   case 1:
-    radio_frequency += 0.005;
+    radio_frequency += 5;
     break;
   case 2:
-    radio_frequency += 0.010;
+    radio_frequency += 10;
     break;
   case 3:
-    radio_frequency += 0.015;
+    radio_frequency += 15;
     break;
   case 4:
-    radio_frequency += 0.025;
+    radio_frequency += 25;
     break;
   case 5:
-    radio_frequency += 0.030;
+    radio_frequency += 30;
     break;
   case 6:
-    radio_frequency += 0.035;
+    radio_frequency += 35;
     break;
   case 7:
-    radio_frequency += 0.040;
+    radio_frequency += 40;
     break;
   case 8:
-    radio_frequency += 0.050;
+    radio_frequency += 50;
     break;
   case 9:
-    radio_frequency += 0.055;
+    radio_frequency += 55;
     break;
   case 10:
-    radio_frequency += 0.060;
+    radio_frequency += 60;
     break;
   case 11:
-    radio_frequency += 0.065;
+    radio_frequency += 65;
     break;
   case 12:
-    radio_frequency += 0.075;
+    radio_frequency += 75;
     break;
   case 13:
-    radio_frequency += 0.080;
+    radio_frequency += 80;
     break;
   case 14:
-    radio_frequency += 0.085;
+    radio_frequency += 85;
     break;
   case 15:
-    radio_frequency += 0.090;
+    radio_frequency += 90;
     break;
   }
 
   RadioFrequency result;
-  result.SetKiloHertz(radio_frequency * 1000.0);
+  result.SetKiloHertz(radio_frequency);
   return result;
 }
 
 uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(RadioFrequency freq)
 {
+  int frequency_bitmask = 0xFFF0;                         //!< bitmask to get the frequency
+
   double frequency = freq.GetKiloHertz() / 1000.0;
   double min_frequency = 118.000;                         //!< the lowest frequency-number which can be set in AR62xx
   double max_frequency = 137.000;                         //!< the highest frequency-number which can be set in AR62xx
   double frequency_range = max_frequency - min_frequency; //!< the frequeny-range which can be set in the AR62xx
-  int frequency_bitmask = 0xFFF0;                         //!< bitmask to get the frequency
   double raster = 3040.0;                                 //!< raster-length
+  uint16_t frequency_id = (frequency-min_frequency) * raster / frequency_range + 0.5;
 
-  uint16_t frequency_id = (((frequency)-min_frequency) * raster / frequency_range + 0.5);
-  frequency_id &= frequency_bitmask;
+  /*
+  //TODO test to remove double
+  int min_frequency = 118000;
+  int max_frequency = 137000;
+  int frequency_range = max_frequency - min_frequency;
+  int raster = 3040;
+  uint16_t frequency_id = (freq.GetKiloHertz()-min_frequency) * raster / frequency_range + 0.5;
+  */
+
+ frequency_id &= frequency_bitmask;
+
+  //get channel
   uint8_t channel = ((int)(frequency * 1000.0 + 0.5)) - (((int)(frequency * 10.0)) * 100);
+
+  // TODO test to remove double
+  //uint8_t channel = freq.GetKiloHertz() % 100;
+
   switch (channel)
   {
   case 0:
