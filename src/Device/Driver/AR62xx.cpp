@@ -49,17 +49,17 @@ typedef union {
 
 class AR62xxDevice final : public AbstractDevice
 {
-  static constexpr char STX = 0x02;                                   //!< command start character.
-  static constexpr char ACK = 0x06;                                   //!< command acknowledged character.
-  static constexpr char NAK = 0x15;                                   //!< command not acknowledged character.
-  static constexpr char NO_RSP = 0;                                   //!< No response received yet.
+  static constexpr char STX = 0x02; //!< command start character.
+  static constexpr char ACK = 0x06; //!< command acknowledged character.
+  static constexpr char NAK = 0x15; //!< command not acknowledged character.
+  static constexpr char NO_RSP = 0; //!< No response received yet.
 
 public:
   explicit AR62xxDevice(Port &_port);
 
 private:
-  Port &port;       //!< Port the radio is connected to.
-  Cond rx_cond;     //!< Condition to signal that a response was received from the radio.
+  Port &port;   //!< Port the radio is connected to.
+  Cond rx_cond; //!< Condition to signal that a response was received from the radio.
 
   IntConvertStruct crc;
   IntConvertStruct frequency;
@@ -76,10 +76,6 @@ private:
   RadioFrequency ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id);
 
   int SetAR620xStation(uint8_t *command, int active_passive, RadioFrequency frequency, const TCHAR *station);
-
-  void AR620xParseString(const char *string, size_t len);
-
-  void AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc);
 
 public:
   virtual bool PutActiveFrequency(RadioFrequency frequency,
@@ -102,19 +98,14 @@ AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
 
 bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInfo &info)
 {
-  assert(_data != nullptr);
-  assert(length > 0);
-  const uint8_t *data = (const uint8_t *)_data;
-  AR620xParseString((const char *)data, length);
-  info.alive.Update(info.clock);
   return true;
 }
 
 bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env)
 {
-  unsigned retries = 3; //!< Number of tries to send a message will be decreased on every retry
-  assert(msg_size > 0); //!< check that msg is not empty
-  Mutex response_mutex; //!< Mutex to be locked to access response.
+  unsigned retries = 3;   //!< Number of tries to send a message will be decreased on every retry
+  assert(msg_size > 0);   //!< check that msg is not empty
+  Mutex response_mutex;   //!< Mutex to be locked to access response.
   uint8_t response = ACK; //!< Last response received from the radio.
 
   do
@@ -186,7 +177,6 @@ RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequenc
 
   //TODO remove when testing non double
   radio_frequency *= 1000.0;
-
 
   //TODO should be put in a formula or sth. else
   switch (channel)
@@ -398,98 +388,6 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFr
   command[command_length++] = crc.intVal8[1];
   command[command_length++] = crc.intVal8[0];
   return command_length;
-}
-
-void AR62xxDevice::AR620xParseString(const char *string, size_t len)
-{
-  size_t cnt = 0;
-  uint16_t CalCRC = 0;
-  static uint16_t Recbuflen = 0;
-  int CommandLength = 0;
-#define REC_BUFSIZE 127
-  static uint8_t command[REC_BUFSIZE];
-
-  if (string == NULL || len == 0)
-    return;
-
-  while (cnt < len)
-  {
-    if ((uint8_t)string[cnt] == HEADER_ID)
-      Recbuflen = 0;
-    if (Recbuflen >= REC_BUFSIZE)
-      Recbuflen = 0;
-    assert(Recbuflen < REC_BUFSIZE);
-
-    command[Recbuflen++] = (uint8_t)string[cnt++];
-    if (Recbuflen == 2)
-    {
-      if (!(command[Recbuflen - 1] == 0x14))
-      {
-        Recbuflen = 0;
-      }
-    }
-
-    if (Recbuflen >= 3)
-    {
-      CommandLength = command[2];
-
-      // all received
-      if (Recbuflen >= (CommandLength + 5))
-      {
-        crc.intVal8[1] = command[CommandLength + 3];
-        crc.intVal8[0] = command[CommandLength + 4];
-        CalCRC = CRCBitwise(command, CommandLength + 3);
-        if (CalCRC == crc.intVal16 || crc.intVal16 == 0)
-        {
-          if (!is_sending)
-          {
-            AR620x_Convert_Answer(command, CommandLength + 5, CalCRC);
-          }
-        }
-        Recbuflen = 0;
-      }
-    }
-  }
-}
-
-void AR62xxDevice::AR620x_Convert_Answer(uint8_t *command, int len, uint16_t crc)
-{
-  if (command == NULL)
-    return;
-  if (len == 0)
-    return;
-
-  static uint16_t uiLastChannelCRC = 0;
-  static uint16_t uiVersionCRC = 0;
-
-  switch ((unsigned char)(command[3] & 0x7F))
-  {
-
-  //TODO check if needed!
-  case 0:
-    if (uiVersionCRC != crc)
-    {
-      uiVersionCRC = crc;
-    }
-    break;
-
-  //!< Frequency settings, always for both frequencies (active and passive)
-  case 22:
-    if (uiLastChannelCRC != crc)
-    {
-      uiLastChannelCRC = crc;
-      frequency.intVal8[1] = command[4];
-      frequency.intVal8[0] = command[5];
-      active_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
-
-      frequency.intVal8[1] = command[6];
-      frequency.intVal8[0] = command[7];
-      passive_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
-    }
-    break;
-  default:
-    break;
-  }
 }
 
 bool AR62xxDevice::PutActiveFrequency(RadioFrequency frequency,
