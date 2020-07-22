@@ -37,15 +37,36 @@ Copyright_License {
 
 #include <stdio.h>
 
-constexpr uint8_t HEADER_ID = 0xA5;
-#define MAX_CMD_LEN 128
-#define ACTIVE_STATION 1
-#define PASSIVE_STATION 0
+/** max command length to send to AR62xx*/
+const int MAX_CMD_LEN = 128;
+/**
+ * 1 = active station of AR62xx
+ * 0 = passive station of AR62xx
+ */
+const int ACTIVE_STATION = 1;
+const int PASSIVE_STATION = 0;
 
-typedef union {
-  uint16_t intVal16;
-  uint8_t intVal8[2];
-} IntConvertStruct;
+/** the lowest frequency which can be set in AR62xx */
+const unsigned MIN_FREQUENCY = 118000;
+
+/** the highest frequency which can be set in AR62xx */
+const unsigned MAX_FREQUENCY = 137000;
+
+/** the highest frequency id which can be set in AR62xx.
+ * this number is used to calculate the particular frequency-id of each frequency.
+ * 
+ * explanation: the AR62xx uses an integer value for each frequency starting at 118000
+ * e.g. frequency-id 0    => 118.000 kHz
+ *      frequency-id 1    => 118.005 kHz
+ *      frequency-id 3040 => 137.000 kHz
+ */
+const int MAX_FREQUENCY_ID = 3040;
+
+/** bitmasks to get the frequency out of a frequency-id */
+const int FREQUENCY_BITMASK = 0xFFF0;
+
+/** bitmasks to get the channel out of a frequency-id */
+const int CHANNEL_BITMASK = 0xF;
 
 class AR62xxDevice final : public AbstractDevice
 {
@@ -59,13 +80,9 @@ private:
   uint8_t response; //!< Last response received from the radio.
   Cond rx_cond;     //!< Condition to signal that a response was received from the radio.
 
-  IntConvertStruct crc;
-  IntConvertStruct frequency;
-  IntConvertStruct status;
-
-  double active_frequency;  //!< active station frequency
-  double passive_frequency; //!< passive (or standby) station frequency
-  bool parameter_changed;   //!< Parameter Changed Flag TRUE = parameter changed)
+  RadioFrequency active_frequency;  //!< active station frequency
+  RadioFrequency passive_frequency; //!< passive (or standby) station frequency
+  bool parameter_changed;           //!< Parameter Changed Flag TRUE = parameter changed)
 
   bool is_sending = false;
 
@@ -75,15 +92,19 @@ private:
 
   bool AR620xPutFreqStandby(RadioFrequency frequency, const TCHAR *station_name, OperationEnvironment &env);
 
-  uint16_t ConvertFrequencyToAR62FrequencyId(double frequency);
+  uint16_t ConvertFrequencyToAR62FrequencyId(RadioFrequency frequency);
 
-  double ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id);
+  RadioFrequency ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id);
 
   int SetAR620xStation(uint8_t *command, int active_passive, RadioFrequency frequency, const TCHAR *station);
 
   bool AR620xParseString(const char *string, size_t len);
 
   int AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t crc);
+
+  uint8_t GetNthByte(unsigned number, int n);
+
+  unsigned BytesToUnsigned(uint8_t first, uint8_t second);
 
 public:
   virtual bool PutActiveFrequency(RadioFrequency frequency,
@@ -100,6 +121,18 @@ AR62xxDevice::AR62xxDevice(Port &_port) : port(_port)
   response = ACK;
 }
 
+/** get the n-th byte of an unsigned INT */
+uint8_t AR62xxDevice::GetNthByte(unsigned number, int n)
+{
+  return number >> (8 * n) & 0xff;
+}
+
+/** build an unsigned-int with two bytes */
+unsigned AR62xxDevice::BytesToUnsigned(uint8_t first, uint8_t second)
+{
+  return second << 8 | first;
+}
+
 bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInfo &info)
 {
 
@@ -113,191 +146,70 @@ bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInf
 
 bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env)
 {
-  unsigned retries = 3; //!< Number of tries to send a message will be decreased on every retry
-  assert(msg_size > 0); //!< check that msg is not empty
-  Mutex response_mutex; //!< Mutex to be locked to access response.
+  unsigned retries = 5; //!< Number of tries to send a message will be decreased on every retry
+  bool message_sent = false;
 
   do
   {
-    {
-      const std::lock_guard<Mutex> lock(response_mutex);
-
-      //initialize response with "No response received yet"
-      response = 0; 
-    }
-
-    is_sending = true; //!< set sending-flat
-
-    //check if message sent
-    if (!port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250)))
-    {
-      //if message could not be sent set response to "command not acknowledged character"
-      response = 0x15; 
-    }
-
-    //message sent
-    else
-    {
-      response = ACK; //!< if message could be sent set response to "command acknowledged character"
-    }
-
-    //!< Wait for the response
-    uint8_t _response;
-    {
-      std::unique_lock<Mutex> lock(response_mutex);
-      rx_cond.wait_for(lock, std::chrono::milliseconds(250)); //!< wait for the response
-      _response = response;
-    }
-    is_sending = false; //!< reset flag is_sending
-
-    //!< ACK received
-    if (_response == ACK)
-    {
-      // ACK received, finish, all went well
-      return true;
-    }
-
-    //!< No ACK received, retry, possibly an error occurred
+    message_sent = port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250));
     retries--;
-  } while (retries);
+  } while (retries > 0 && !message_sent);
 
-  //!< returns false if message could not be sent
-  return false;
+  return message_sent;
 }
 
-double AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
+RadioFrequency AR62xxDevice::ConvertAR62FrequencyIDToFrequency(uint16_t frequency_id)
 {
-  double min_frequency = 118.000;                                                                         //!< the lowest frequency-number which can be set in AR62xx
-  double max_frequency = 137.000;                                                                         //!< the highest frequency-number which can be set in AR62xx
-  double frequency_range = max_frequency - min_frequency;                                                 //!< the frequeny-range which can be set in the AR62xx
-  int frequency_bitmask = 0xFFF0;                                                                         //!< bitmask to get the frequency
-  int channel_bitmask = 0xF;                                                                              //!< bitmask to get the chanel
-  double raster = 3040.0;                                                                                 //!< raster-length
-  double radio_frequency = min_frequency + (frequency_id & frequency_bitmask) * frequency_range / raster; //!< calculate frequency
+  unsigned frequency_range = MAX_FREQUENCY - MIN_FREQUENCY;
+  unsigned frequency_encoded = frequency_id & FREQUENCY_BITMASK;
+  unsigned channel_encoded = frequency_id & CHANNEL_BITMASK;
 
-  //!< get the channel out of the frequence_id
-  switch (frequency_id & channel_bitmask)
-  {
-  case 0:
-    radio_frequency += 0.000;
-    break;
-  case 1:
-    radio_frequency += 0.005;
-    break;
-  case 2:
-    radio_frequency += 0.010;
-    break;
-  case 3:
-    radio_frequency += 0.015;
-    break;
-  case 4:
-    radio_frequency += 0.025;
-    break;
-  case 5:
-    radio_frequency += 0.030;
-    break;
-  case 6:
-    radio_frequency += 0.035;
-    break;
-  case 7:
-    radio_frequency += 0.040;
-    break;
-  case 8:
-    radio_frequency += 0.050;
-    break;
-  case 9:
-    radio_frequency += 0.055;
-    break;
-  case 10:
-    radio_frequency += 0.060;
-    break;
-  case 11:
-    radio_frequency += 0.065;
-    break;
-  case 12:
-    radio_frequency += 0.075;
-    break;
-  case 13:
-    radio_frequency += 0.080;
-    break;
-  case 14:
-    radio_frequency += 0.085;
-    break;
-  case 15:
-    radio_frequency += 0.090;
-    break;
-  }
+  unsigned frequency = MIN_FREQUENCY + frequency_encoded * frequency_range / MAX_FREQUENCY_ID;
+
+  if (channel_encoded <= 3)
+    frequency += channel_encoded * 5;
+  else if (channel_encoded <= 7)
+    frequency += channel_encoded * 5 + 5;
+  else if (channel_encoded <= 11)
+    frequency += channel_encoded * 5 + 10;
+  else if (channel_encoded <= 15)
+    frequency += channel_encoded * 5 + 15;
+
+  RadioFrequency radio_frequency = RadioFrequency();
+  radio_frequency.SetKiloHertz(frequency);
+
   return radio_frequency;
 }
 
-uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(double frequency)
+uint16_t AR62xxDevice::ConvertFrequencyToAR62FrequencyId(RadioFrequency freq)
 {
+  unsigned frequency = freq.GetKiloHertz();
 
-  double min_frequency = 118.000;                         //!< the lowest frequency-number which can be set in AR62xx
-  double max_frequency = 137.000;                         //!< the highest frequency-number which can be set in AR62xx
-  double frequency_range = max_frequency - min_frequency; //!< the frequeny-range which can be set in the AR62xx
-  int frequency_bitmask = 0xFFF0;                         //!< bitmask to get the frequency
-  double raster = 3040.0;                                 //!< raster-length
+  /** check if frequency is not in range */
+  if (frequency < MIN_FREQUENCY || frequency > MAX_FREQUENCY)
+    return 0;
 
-  uint16_t frequency_id = (((frequency)-min_frequency) * raster / frequency_range + 0.5);
-  frequency_id &= frequency_bitmask;
-  uint8_t channel = ((int)(frequency * 1000.0 + 0.5)) - (((int)(frequency * 10.0)) * 100);
-  switch (channel)
-  {
-  case 0:
-    frequency_id += 0;
-    break;
-  case 5:
-    frequency_id += 1;
-    break;
-  case 10:
-    frequency_id += 2;
-    break;
-  case 15:
-    frequency_id += 3;
-    break;
-  case 25:
-    frequency_id += 4;
-    break;
-  case 30:
-    frequency_id += 5;
-    break;
-  case 35:
-    frequency_id += 6;
-    break;
-  case 40:
-    frequency_id += 7;
-    break;
-  case 50:
-    frequency_id += 8;
-    break;
-  case 55:
-    frequency_id += 9;
-    break;
-  case 60:
-    frequency_id += 10;
-    break;
-  case 65:
-    frequency_id += 11;
-    break;
-  case 75:
-    frequency_id += 12;
-    break;
-  case 80:
-    frequency_id += 13;
-    break;
-  case 85:
-    frequency_id += 14;
-    break;
-  case 90:
-    frequency_id += 15;
-    break;
-  case 100:
-    frequency_id += 0;
-    break;
-  default:
-    break;
-  }
+  unsigned frequency_range = MAX_FREQUENCY - MIN_FREQUENCY;
+  unsigned frequency_offset = frequency - MIN_FREQUENCY;
+
+  /** generate frequency-id */
+  uint16_t frequency_id = std::round(frequency_offset * MAX_FREQUENCY_ID / frequency_range);
+
+  frequency_id &= FREQUENCY_BITMASK;
+
+  /** get channel out of frequency */
+  uint8_t channel = frequency % 100;
+
+  /** encode channel and add to frequency */
+  if (channel <= 15)
+    frequency_id += channel / 5;
+  else if (channel <= 40)
+    frequency_id += channel / 5 - 1;
+  else if (channel <= 65)
+    frequency_id += channel / 5 - 2;
+  else if (channel <= 90)
+    frequency_id += channel / 5 - 3;
+
   return (frequency_id);
 }
 
@@ -329,44 +241,38 @@ int AR62xxDevice::SetAR620xStation(uint8_t *command, int active_passive, RadioFr
   {
     return false;
   }
-  //!< converting both actual frequencies
-  IntConvertStruct ActiveFreqIdx;
-
-  ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(active_frequency);
-  IntConvertStruct PassiveFreqIdx;
-  PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(passive_frequency);
-  command[len++] = HEADER_ID;
+  uint16_t active_frequency_idx = ConvertFrequencyToAR62FrequencyId(active_frequency);
+  uint16_t passive_frequency_idx = ConvertFrequencyToAR62FrequencyId(passive_frequency);
+  command[len++] = 0xA5;
 
   //add prot-ID
   command[len++] = 0x14;
 
   command[len++] = 5;
 
-  double freq = frequency.GetKiloHertz() / 1000.0;
-
   //!< converting the frequency which is to be changed
   switch (active_passive)
   {
   case ACTIVE_STATION:
-    ActiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(freq);
+    active_frequency_idx = ConvertFrequencyToAR62FrequencyId(frequency);
     break;
   default:
   case PASSIVE_STATION:
-    PassiveFreqIdx.intVal16 = ConvertFrequencyToAR62FrequencyId(freq);
+    passive_frequency_idx = ConvertFrequencyToAR62FrequencyId(frequency);
     break;
   }
 
   //!< setting frequencies -command byte in the protocol of the radio
   command[len++] = 22;
-  command[len++] = ActiveFreqIdx.intVal8[1];
-  command[len++] = ActiveFreqIdx.intVal8[0];
-  command[len++] = PassiveFreqIdx.intVal8[1];
-  command[len++] = PassiveFreqIdx.intVal8[0];
+  command[len++] = GetNthByte(active_frequency_idx, 1);
+  command[len++] = GetNthByte(active_frequency_idx, 0);
+  command[len++] = GetNthByte(passive_frequency_idx, 1);
+  command[len++] = GetNthByte(passive_frequency_idx, 0);
 
   //!< Creating the binary value
-  crc.intVal16 = CRCBitwise(command, len);
-  command[len++] = crc.intVal8[1];
-  command[len++] = crc.intVal8[0];
+  uint16_t command_crc = CRCBitwise(command, len);
+  command[len++] = GetNthByte(command_crc, 1);
+  command[len++] = GetNthByte(command_crc, 0);
   return len;
 }
 
@@ -404,7 +310,7 @@ bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
 
   while (cnt < len)
   {
-    if ((uint8_t)string[cnt] == HEADER_ID)
+    if ((uint8_t)string[cnt] == 0xA5)
       Recbuflen = 0;
     if (Recbuflen >= REC_BUFSIZE)
       Recbuflen = 0;
@@ -426,10 +332,10 @@ bool AR62xxDevice::AR620xParseString(const char *string, size_t len)
       // all received
       if (Recbuflen >= (CommandLength + 5))
       {
-        crc.intVal8[1] = command[CommandLength + 3];
-        crc.intVal8[0] = command[CommandLength + 4];
+        uint16_t crc_value = BytesToUnsigned(command[CommandLength + 4], command[CommandLength + 3]);
+
         CalCRC = CRCBitwise(command, CommandLength + 3);
-        if (CalCRC == crc.intVal16 || crc.intVal16 == 0)
+        if (CalCRC == crc_value || crc_value == 0)
         {
           if (!is_sending)
           {
@@ -450,44 +356,20 @@ int AR62xxDevice::AR620x_Convert_Answer(uint8_t *sz_command, int len, uint16_t c
   if (len == 0)
     return 0;
 
-  static uint16_t uiLastChannelCRC = 0;
-  static uint16_t uiVersionCRC = 0;
-
-  int processed = 0;
-
   assert(sz_command != NULL);
 
   switch ((unsigned char)(sz_command[3] & 0x7F))
   {
-  case 0:
-    if (uiVersionCRC != crc)
-    {
-      uiVersionCRC = crc;
-    }
-    break;
-
   //!< Frequency settings, always for both frequencies (active and passive)
   case 22:
-    if (uiLastChannelCRC != crc)
-    {
-      uiLastChannelCRC = crc;
-      parameter_changed = true;
-      frequency.intVal8[1] = sz_command[4];
-      frequency.intVal8[0] = sz_command[5];
-      active_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
-
-      frequency.intVal8[1] = sz_command[6];
-      frequency.intVal8[0] = sz_command[7];
-      passive_frequency = ConvertAR62FrequencyIDToFrequency(frequency.intVal16);
-      parameter_changed = true;
-    }
+    active_frequency = ConvertAR62FrequencyIDToFrequency(BytesToUnsigned(sz_command[5], sz_command[4]));
+    passive_frequency = ConvertAR62FrequencyIDToFrequency(BytesToUnsigned(sz_command[7], sz_command[6]));
     break;
   default:
     break;
   }
 
-  //!< return the number of converted characters
-  return processed;
+  return 0;
 }
 
 bool AR62xxDevice::PutActiveFrequency(RadioFrequency frequency,
