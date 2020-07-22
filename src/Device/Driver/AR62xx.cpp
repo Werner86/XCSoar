@@ -51,6 +51,7 @@ const unsigned MIN_FREQUENCY = 118000;
 /** the highest frequency which can be set in AR62xx */
 const unsigned MAX_FREQUENCY = 137000;
 
+
 /** the highest frequency id which can be set in AR62xx.
  * this number is used to calculate the particular frequency-id of each frequency.
  * 
@@ -66,6 +67,12 @@ const int FREQUENCY_BITMASK = 0xFFF0;
 
 /** bitmasks to get the channel out of a frequency-id */
 const int CHANNEL_BITMASK = 0xF;
+
+//TODO should be removed as we (could) have a byte-order-problem when using this
+typedef union {
+  uint16_t intVal16;
+  uint8_t intVal8[2];
+} IntConvertStruct;
 
 class AR62xxDevice final : public AbstractDevice
 {
@@ -166,7 +173,73 @@ bool AR62xxDevice::DataReceived(const void *_data, size_t length, struct NMEAInf
 
 bool AR62xxDevice::Send(const uint8_t *msg, unsigned msg_size, OperationEnvironment &env)
 {
-  return port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250));
+  //TODO check if this can be replaced with (and all other be removed)
+  //return port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250));
+
+  /** Number of tries to send a message will be decreased on every retry */
+  unsigned retries = 3;
+
+  /** check that msg is not empty */
+  assert(msg_size > 0);
+
+  /* Mutex to be locked to access response. */
+  Mutex response_mutex;
+
+  /** Condition to signal that a response was received from the radio. */
+  Cond rx_cond;
+
+  do
+  {
+    {
+      const std::lock_guard<Mutex> lock(response_mutex);
+
+      /** initialize response with "No response received yet" */
+      response = NO_RSP;
+    }
+
+    /** set sending-flat */
+    is_sending = true;
+
+    /** message NOT sent */
+    if (!port.FullWrite(msg, msg_size, env, std::chrono::milliseconds(250)))
+    {
+      /** if message could not be sent set response to "command not acknowledged character" */
+      response = NAK;
+    }
+
+    /** message sent */
+    else
+    {
+      /** if message could be sent set response to "command acknowledged character" */
+      response = ACK;
+    }
+
+    /** Wait for the response */
+    uint8_t _response;
+    {
+      std::unique_lock<Mutex> lock(response_mutex);
+
+      /** wait for the response */
+      rx_cond.wait_for(lock, std::chrono::milliseconds(250));
+      _response = response;
+    }
+
+    /** reset flag is_sending */
+    is_sending = false;
+
+    /** ACK received */
+    if (_response == ACK)
+    {
+      /** ACK received, finish, all went well */
+      return true;
+    }
+
+    /** No ACK received, retry, possibly an error occurred */
+    retries--;
+  } while (retries);
+
+  /** returns false if message could not be sent */
+  return false;
 }
 
 RadioFrequency AR62xxDevice::IdToFrequency(uint16_t frequency_id)
@@ -256,6 +329,14 @@ int AR62xxDevice::SetStation(uint8_t *command, int active_passive, RadioFrequenc
   uint16_t current_active_frequency = FrequencyToId(active_frequency);
   uint16_t current_passive_frequency = FrequencyToId(passive_frequency);
 
+  //TODO check if this can be removed
+  IntConvertStruct ActiveFreqIdx;
+  ActiveFreqIdx.intVal16 = current_active_frequency;
+
+  //TODO check if this can be removed
+  IntConvertStruct PassiveFreqIdx;
+  PassiveFreqIdx.intVal16 = current_passive_frequency;
+
   /** add header */
   command[len++] = 0xA5;
 
@@ -269,26 +350,53 @@ int AR62xxDevice::SetStation(uint8_t *command, int active_passive, RadioFrequenc
   {
   case ACTIVE_STATION:
     current_active_frequency = FrequencyToId(active_frequency);
+    //TODO check if this can be removed
+    ActiveFreqIdx.intVal16 = current_active_frequency;
     break;
   default:
   case PASSIVE_STATION:
     current_passive_frequency = FrequencyToId(passive_frequency);
+    //TODO check if this can be removed
+    PassiveFreqIdx.intVal16 = current_passive_frequency;
     break;
   }
 
   /** setting frequencies -command byte in the protocol of the radio */
   command[len++] = 22;
 
-  command[len++] = GetNthByte(current_active_frequency, 1);
-  command[len++] = GetNthByte(current_active_frequency, 0);
-  command[len++] = GetNthByte(current_passive_frequency, 1);
-  command[len++] = GetNthByte(current_passive_frequency, 0);
+  //TODO check if this can be used
+  //command[len++] = getByte(current_active_frequency, 1);
+  //command[len++] = getByte(current_active_frequency, 0);
+
+  //TODO check if this can be removed
+  command[len++] = ActiveFreqIdx.intVal8[1];
+  command[len++] = ActiveFreqIdx.intVal8[0];
+
+  //TODO check if this can be used
+  //command[len++] = getByte(current_passive_frequency, 1);
+  //command[len++] = getByte(current_passive_frequency, 0);
+
+  //TODO check if this can be removed
+  command[len++] = PassiveFreqIdx.intVal8[1];
+  command[len++] = PassiveFreqIdx.intVal8[0];
 
   /** Creating the binary value */
+
+  //TODO check if this can be removed
+  IntConvertStruct crc;
+
   uint16_t crc_value = CRCBitwise(command, len);
 
+  //TODO check if this can be removed
+  crc.intVal16 = crc_value;
+
+  //TODO check if this can be used
   command[len++] = GetNthByte(crc_value, 1);
   command[len++] = GetNthByte(crc_value, 0);
+
+  //TODO check if this can be removed
+  command[len++] = crc.intVal8[1];
+  command[len++] = crc.intVal8[0];
 
   return len;
 }
@@ -332,7 +440,14 @@ void AR62xxDevice::SaveFrequencies(const char *string, size_t len)
       /** all received */
       if (rec_buf_len >= (command_length + 5))
       {
-        uint16_t command_crc = BytesToUnsigned(command[command_length + 4], command[command_length + 3]);
+        //TODO check if this can be removed
+        IntConvertStruct crc;
+        crc.intVal8[1] = command[command_length + 3];
+        crc.intVal8[0] = command[command_length + 4];
+        uint16_t command_crc = crc.intVal16;
+
+        //TODO check if this can be used
+        //uint16_t command_crc = bytes2Unsigned(command[CommandLength + 4],command[CommandLength + 3]);
 
         calc_crc = CRCBitwise(command, command_length + 3);
         if ((calc_crc == command_crc || command_crc == 0) && !is_sending && command != NULL)
@@ -345,8 +460,28 @@ void AR62xxDevice::SaveFrequencies(const char *string, size_t len)
           case 22:
             if (0 != calc_crc)
             {
-              active_frequency = IdToFrequency(BytesToUnsigned(command[5], command[4]));
-              passive_frequency = IdToFrequency(BytesToUnsigned(command[7], command[6]));
+              uint16_t frequency_uint16;
+
+              //TODO check if this can be removed
+              IntConvertStruct frequency;
+              frequency.intVal8[1] = command[4];
+              frequency.intVal8[0] = command[5];
+              frequency_uint16 = frequency.intVal16;
+
+              //TODO check if this can be used
+              frequency_uint16 = BytesToUnsigned(command[5], command[4]);
+
+              active_frequency = IdToFrequency(frequency_uint16);
+
+              //TODO check if this can be removed
+              frequency.intVal8[1] = command[6];
+              frequency.intVal8[0] = command[7];
+              frequency_uint16 = frequency.intVal16;
+
+              //TODO check if this can be used
+              frequency_uint16 = BytesToUnsigned(command[7], command[6]);
+
+              passive_frequency = IdToFrequency(frequency_uint16);
             }
             break;
           default:
